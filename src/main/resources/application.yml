@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: my-line-assistant
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+line:
+  bot:
+    channel-secret: ${LINE_CHANNEL_SECRET:}
+    channel-access-token: ${LINE_CHANNEL_ACCESS_TOKEN:}
+    owner-user-id: ${LINE_OWNER_USER_ID:}
