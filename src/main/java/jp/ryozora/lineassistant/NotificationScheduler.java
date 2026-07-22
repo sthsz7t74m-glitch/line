@@ -28,15 +28,17 @@ public class NotificationScheduler {
     private final WeatherService weather;
     private final LinePushService push;
     private final AiSecretaryService secretary;
+    private final HabitService habitService;
 
     public NotificationScheduler(NotificationStore store, NotificationDataStore dataStore,
                                  WeatherService weather, LinePushService push,
-                                 AiSecretaryService secretary) {
+                                 AiSecretaryService secretary, HabitService habitService) {
         this.store = store;
         this.dataStore = dataStore;
         this.weather = weather;
         this.push = push;
         this.secretary = secretary;
+        this.habitService = habitService;
     }
 
     @Scheduled(cron = "0 0 6 * * *", zone = "Asia/Tokyo")
@@ -86,6 +88,20 @@ public class NotificationScheduler {
                 } catch (RuntimeException ignored) {
                     // Delivery reservation prevents duplicates; failures remain private.
                 }
+            }
+        }
+    }
+
+    @Scheduled(cron = "0 */1 * * * *", zone = "Asia/Tokyo")
+    public void sendHabitNotifications() {
+        LocalDateTime now = LocalDateTime.now(TOKYO).withSecond(0).withNano(0);
+        for (HabitService.HabitReminder habit : habitService.dueReminders(now)) {
+            String key = habit.id() + ":" + now.toLocalDate();
+            if (!dataStore.reserveDelivery(habit.userId(), "HABIT", key)) continue;
+            try {
+                push.pushHabitReminder(habit.userId(), habit.id(), habit.name());
+            } catch (RuntimeException ignored) {
+                // Keep habit names and user identifiers out of scheduler logs.
             }
         }
     }
