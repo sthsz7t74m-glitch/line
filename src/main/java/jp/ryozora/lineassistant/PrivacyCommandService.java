@@ -13,6 +13,7 @@ public class PrivacyCommandService {
     private final HabitService habitService;
     private final TaskService taskService;
     private final RichMenuSetupService richMenuSetupService;
+    private final RichMenuPostbackUpgradeService richMenuPostbackUpgradeService;
 
     public PrivacyCommandService(BenlyStore store,
                                  AiSecretaryService secretaryService,
@@ -21,7 +22,8 @@ public class PrivacyCommandService {
                                  NotificationPreferenceCommandService notificationPreferenceCommands,
                                  HabitService habitService,
                                  TaskService taskService,
-                                 RichMenuSetupService richMenuSetupService) {
+                                 RichMenuSetupService richMenuSetupService,
+                                 RichMenuPostbackUpgradeService richMenuPostbackUpgradeService) {
         this.store = store;
         this.secretaryService = secretaryService;
         this.contextualService = contextualService;
@@ -30,6 +32,7 @@ public class PrivacyCommandService {
         this.habitService = habitService;
         this.taskService = taskService;
         this.richMenuSetupService = richMenuSetupService;
+        this.richMenuPostbackUpgradeService = richMenuPostbackUpgradeService;
     }
 
     public String handle(String userId, String raw) {
@@ -44,8 +47,9 @@ public class PrivacyCommandService {
         }
         if (text.equals("リッチメニュー再設定")) {
             try {
-                String id = richMenuSetupService.recreateForUser(userId);
-                return "リッチメニューを新しく作り直して、あなたのLINEへ直接紐付けたよ。\nID：" + id
+                richMenuSetupService.recreateForUser(userId);
+                String id = richMenuPostbackUpgradeService.upgrade();
+                return "日本語のリッチメニューを作り直して、postback版を紐付けたよ。\nID：" + id
                         + "\n\nトークを一度閉じて開き直してね。";
             } catch (Exception e) {
                 return "リッチメニューの再設定に失敗したよ。\n\n"
