@@ -11,6 +11,17 @@ import java.util.List;
 public class NotificationScheduler {
     private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
     private static final ZoneOffset OFFSET = ZoneOffset.ofHours(9);
+    private static final int ONE_MONTH_MINUTES = 30 * 24 * 60;
+    private static final int ONE_WEEK_MINUTES = 7 * 24 * 60;
+    private static final int ONE_DAY_MINUTES = 24 * 60;
+    private static final int[] STANDARD_REMINDERS = {
+            ONE_MONTH_MINUTES,
+            ONE_WEEK_MINUTES,
+            ONE_DAY_MINUTES,
+            60,
+            5,
+            0
+    };
 
     private final NotificationStore store;
     private final NotificationDataStore dataStore;
@@ -62,7 +73,7 @@ public class NotificationScheduler {
     public void sendScheduleNotifications() {
         OffsetDateTime now = OffsetDateTime.now(OFFSET).withSecond(0).withNano(0);
         List<NotificationDataStore.UpcomingSchedule> schedules =
-                dataStore.upcomingSchedules(now.minusMinutes(1), now.plusMinutes(1441));
+                dataStore.upcomingSchedules(now.minusMinutes(1), now.plusMinutes(ONE_MONTH_MINUTES + 1L));
         for (NotificationDataStore.UpcomingSchedule schedule : schedules) {
             for (int minutes : reminderMinutes(schedule.reminderMinutes())) {
                 OffsetDateTime notifyAt = schedule.startsAt().minusMinutes(minutes).withSecond(0).withNano(0);
@@ -80,12 +91,22 @@ public class NotificationScheduler {
     }
 
     private int[] reminderMinutes(String raw) {
-        if (raw == null || raw.isBlank()) return new int[]{30};
-        return java.util.Arrays.stream(raw.split(","))
+        // Empty text is the explicit "通知なし" setting.
+        if (raw != null && raw.isBlank()) return new int[0];
+
+        // Null and the former 30-minute default are upgraded to the new standard policy.
+        if (raw == null || raw.strip().equals("30")) return STANDARD_REMINDERS.clone();
+
+        String normalized = raw.strip();
+        if (normalized.startsWith("C:") || normalized.startsWith("D:")) {
+            normalized = normalized.substring(2);
+        }
+
+        return java.util.Arrays.stream(normalized.split(","))
                 .map(String::strip)
-                .filter(v -> v.matches("\\d{1,4}"))
+                .filter(v -> v.matches("\\d{1,5}"))
                 .mapToInt(Integer::parseInt)
-                .filter(v -> v >= 0 && v <= 10080)
+                .filter(v -> v >= 0 && v <= ONE_MONTH_MINUTES)
                 .distinct()
                 .toArray();
     }
