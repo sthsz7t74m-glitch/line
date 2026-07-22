@@ -23,9 +23,9 @@ public class BenlyCommandService {
         String text = normalize(raw);
         store.ensureUser(userId);
 
-        if (text.equals("ヘルプ") || text.equalsIgnoreCase("help") || text.equals("使い方")) {
-            return help();
-        }
+        String helpResponse = featureHelp(text);
+        if (helpResponse != null) return helpResponse;
+
         if (text.startsWith("メモ ")) {
             String content = text.substring(3).strip();
             if (content.isBlank()) return "メモの内容も書いてなー！";
@@ -124,7 +124,111 @@ public class BenlyCommandService {
         if (text.equals("時刻") || text.equals("時間")) {
             return ZonedDateTime.now(TOKYO).format(DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss"));
         }
-        return "受け取ったよ：『" + text + "』\n\n『ヘルプ』でコマンド一覧が見られるよ！";
+        return "受け取ったよ：『" + text + "』\n\n『ヘルプ』で機能別メニューが見られるよ！";
+    }
+
+    private String featureHelp(String text) {
+        return switch (text) {
+            case "ヘルプ", "使い方", "コマンド", "メニュー" -> mainHelp();
+            case "メモヘルプ", "メモ使い方" -> memoHelp();
+            case "タスクヘルプ", "タスク使い方" -> taskHelp();
+            case "買い物ヘルプ", "買い物使い方" -> shoppingHelp();
+            case "予定ヘルプ", "予定使い方" -> scheduleHelp();
+            case "その他ヘルプ", "基本ヘルプ" -> utilityHelp();
+            default -> text.equalsIgnoreCase("help") ? mainHelp() : null;
+        };
+    }
+
+    private String mainHelp() {
+        return """
+                ベンリー 機能メニュー
+
+                📝 メモ
+                「メモヘルプ」
+
+                ✅ タスク
+                「タスクヘルプ」
+
+                🛒 買い物
+                「買い物ヘルプ」
+
+                📅 予定
+                「予定ヘルプ」
+
+                ⚙️ その他
+                「その他ヘルプ」
+
+                使いたい機能名＋「ヘルプ」と送ってね！
+                """.strip();
+    }
+
+    private String memoHelp() {
+        return """
+                📝 メモのコマンド
+
+                【追加・確認】
+                ・メモ 牛乳を買う
+                ・メモ一覧
+                ・メモ検索 牛乳
+
+                【整理】
+                ・メモ編集 1 牛乳を2本買う
+                ・お気に入り 1
+                ・タグ 1 買い物,重要
+
+                【削除】
+                ・メモ削除 1
+                ・メモ全削除
+                """.strip();
+    }
+
+    private String taskHelp() {
+        return """
+                ✅ タスクのコマンド
+
+                【追加・確認】
+                ・タスク 部屋を片づける
+                ・タスク一覧
+
+                【完了】
+                ・完了 1
+                """.strip();
+    }
+
+    private String shoppingHelp() {
+        return """
+                🛒 買い物のコマンド
+
+                【追加・確認】
+                ・買い物 卵
+                ・買い物一覧
+
+                【購入済みにする】
+                ・購入 1
+                """.strip();
+    }
+
+    private String scheduleHelp() {
+        return """
+                📅 予定のコマンド
+
+                【登録】
+                ・予定 2026-07-23 19:00 歯医者
+
+                【確認】
+                ・今日の予定
+                """.strip();
+    }
+
+    private String utilityHelp() {
+        return """
+                ⚙️ その他のコマンド
+
+                ・経験値
+                ・時刻
+                ・アプリ
+                ・ヘルプ
+                """.strip();
     }
 
     private String normalize(String raw) {
@@ -189,30 +293,6 @@ public class BenlyCommandService {
         String content = stripped.substring(space + 1).strip();
         if (id == null || content.isBlank()) return null;
         return new IdAndText(id, content);
-    }
-
-    private String help() {
-        return """
-                ベンリーで使えるコマンド
-                ・メモ 牛乳を買う
-                ・メモ一覧
-                ・メモ検索 牛乳
-                ・メモ編集 1 牛乳を2本買う
-                ・メモ削除 1
-                ・お気に入り 1
-                ・タグ 1 買い物,重要
-                ・メモ全削除
-                ・タスク 部屋を片づける
-                ・タスク一覧
-                ・完了 1
-                ・買い物 卵
-                ・買い物一覧
-                ・購入 1
-                ・予定 2026-07-23 19:00 歯医者
-                ・今日の予定
-                ・経験値
-                ・時刻
-                """.strip();
     }
 
     private record IdAndText(long id, String text) {}
