@@ -15,37 +15,39 @@ public class NotificationScheduler {
     private static final int ONE_WEEK_MINUTES = 7 * 24 * 60;
     private static final int ONE_DAY_MINUTES = 24 * 60;
     private static final int[] STANDARD_REMINDERS = {
-            ONE_MONTH_MINUTES,
-            ONE_WEEK_MINUTES,
-            ONE_DAY_MINUTES,
-            60,
-            5,
-            0
+            ONE_MONTH_MINUTES, ONE_WEEK_MINUTES, ONE_DAY_MINUTES, 60, 5, 0
     };
 
     private final NotificationStore store;
     private final NotificationDataStore dataStore;
+    private final NotificationPreferenceService preferences;
     private final WeatherService weather;
     private final LinePushService push;
     private final AiSecretaryService secretary;
     private final HabitService habitService;
 
     public NotificationScheduler(NotificationStore store, NotificationDataStore dataStore,
+                                 NotificationPreferenceService preferences,
                                  WeatherService weather, LinePushService push,
                                  AiSecretaryService secretary, HabitService habitService) {
         this.store = store;
         this.dataStore = dataStore;
+        this.preferences = preferences;
         this.weather = weather;
         this.push = push;
         this.secretary = secretary;
         this.habitService = habitService;
     }
 
-    @Scheduled(cron = "0 0 6 * * *", zone = "Asia/Tokyo")
+    @Scheduled(cron = "0 */1 * * * *", zone = "Asia/Tokyo")
     public void sendMorningNotifications() {
-        LocalDate today = LocalDate.now(TOKYO);
+        LocalDateTime now = LocalDateTime.now(TOKYO).withSecond(0).withNano(0);
+        LocalDate today = now.toLocalDate();
         for (String userId : store.morningUsers(today)) {
             try {
+                NotificationPreferenceService.Preferences p = preferences.get(userId);
+                if (!p.morning().equals(now.toLocalTime())) continue;
+                if (!preferences.isAllowedNow(userId, now.toLocalTime())) continue;
                 push.pushMorningBriefing(userId, secretary.morningBriefing(userId));
                 store.markMorning(userId, today);
             } catch (RuntimeException ignored) {
@@ -59,6 +61,7 @@ public class NotificationScheduler {
         LocalDateTime now = LocalDateTime.now(TOKYO);
         for (String userId : store.rainUsers(now.minusHours(6))) {
             try {
+                if (!preferences.isAllowedNow(userId, now.toLocalTime())) continue;
                 NotificationStore.Settings settings = store.get(userId);
                 WeatherService.Forecast forecast = weather.fetch(settings.latitude(), settings.longitude());
                 if (!forecast.rainSoon()) continue;
@@ -77,6 +80,7 @@ public class NotificationScheduler {
         List<NotificationDataStore.UpcomingSchedule> schedules =
                 dataStore.upcomingSchedules(now.minusMinutes(1), now.plusMinutes(ONE_MONTH_MINUTES + 1L));
         for (NotificationDataStore.UpcomingSchedule schedule : schedules) {
+            if (!preferences.isAllowedNow(schedule.userId(), now.toLocalTime())) continue;
             for (int minutes : reminderMinutes(schedule.reminderMinutes())) {
                 OffsetDateTime notifyAt = schedule.startsAt().minusMinutes(minutes).withSecond(0).withNano(0);
                 if (notifyAt.isBefore(now.minusSeconds(30)) || notifyAt.isAfter(now.plusSeconds(30))) continue;
@@ -98,6 +102,7 @@ public class NotificationScheduler {
         List<NotificationDataStore.UpcomingTask> tasks =
                 dataStore.upcomingTasks(now.minusMinutes(1), now.plusMinutes(ONE_MONTH_MINUTES + 1L));
         for (NotificationDataStore.UpcomingTask task : tasks) {
+            if (!preferences.isAllowedNow(task.userId(), now.toLocalTime())) continue;
             for (int minutes : taskReminderMinutes(task.reminderMinutes())) {
                 OffsetDateTime notifyAt = task.dueAt().minusMinutes(minutes).withSecond(0).withNano(0);
                 if (notifyAt.isBefore(now.minusSeconds(30)) || notifyAt.isAfter(now.plusSeconds(30))) continue;
@@ -117,6 +122,7 @@ public class NotificationScheduler {
     public void sendHabitNotifications() {
         LocalDateTime now = LocalDateTime.now(TOKYO).withSecond(0).withNano(0);
         for (HabitService.HabitReminder habit : habitService.dueReminders(now)) {
+            if (!preferences.isAllowedNow(habit.userId(), now.toLocalTime())) continue;
             String key = habit.id() + ":" + now.toLocalDate();
             if (!dataStore.reserveDelivery(habit.userId(), "HABIT", key)) continue;
             try {
@@ -128,17 +134,10 @@ public class NotificationScheduler {
     }
 
     private int[] reminderMinutes(String raw) {
-        // Empty text is the explicit "通知なし" setting.
         if (raw != null && raw.isBlank()) return new int[0];
-
-        // Null and the former 30-minute default are upgraded to the new standard policy.
         if (raw == null || raw.strip().equals("30")) return STANDARD_REMINDERS.clone();
-
         String normalized = raw.strip();
-        if (normalized.startsWith("C:") || normalized.startsWith("D:")) {
-            normalized = normalized.substring(2);
-        }
-
+        if (normalized.startsWith("C:") || normalized.startsWith("D:")) normalized = normalized.substring(2);
         return parseReminderValues(normalized);
     }
 
@@ -153,15 +152,18 @@ public class NotificationScheduler {
                 .filter(v -> v.matches("\\d{1,5}"))
                 .mapToInt(Integer::parseInt)
                 .filter(v -> v >= 0 && v <= ONE_MONTH_MINUTES)
-                .distinct()
-                .toArray();
+                .distinct().toArray();
     }
 
-    @Scheduled(cron = "0 0 21 * * *", zone = "Asia/Tokyo")
+    @Scheduled(cron = "0 */1 * * * *", zone = "Asia/Tokyo")
     public void sendNightNotifications() {
-        LocalDate today = LocalDate.now(TOKYO);
+        LocalDateTime now = LocalDateTime.now(TOKYO).withSecond(0).withNano(0);
+        LocalDate today = now.toLocalDate();
         for (String userId : dataStore.nightUsers(today)) {
             try {
+                NotificationPreferenceService.Preferences p = preferences.get(userId);
+                if (!p.night().equals(now.toLocalTime())) continue;
+                if (!preferences.isAllowedNow(userId, now.toLocalTime())) continue;
                 NotificationDataStore.NightSummary summary = dataStore.nightSummary(userId, today, OFFSET);
                 push.push(userId, "今日もお疲れさま！\n"
                         + "完了タスク " + summary.completedTasks() + "件\n"
