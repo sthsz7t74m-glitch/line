@@ -8,12 +8,14 @@ public class PrivacyCommandService {
     private final BenlyStore store;
     private final AiSecretaryService secretaryService;
     private final HabitService habitService;
+    private final TaskService taskService;
 
     public PrivacyCommandService(BenlyStore store, AiSecretaryService secretaryService,
-                                 HabitService habitService) {
+                                 HabitService habitService, TaskService taskService) {
         this.store = store;
         this.secretaryService = secretaryService;
         this.habitService = habitService;
+        this.taskService = taskService;
     }
 
     public String handle(String userId, String raw) {
@@ -21,6 +23,11 @@ public class PrivacyCommandService {
 
         if (text.length() > MAX_MESSAGE_LENGTH) {
             return "入力が長すぎるよ！1回のメッセージは1000文字以内にしてね。";
+        }
+
+        // Deadline task phrases must be handled before schedule interpretation.
+        if (taskService.supports(text)) {
+            return taskService.handle(userId, text);
         }
 
         if (secretaryService.supports(text)) {
