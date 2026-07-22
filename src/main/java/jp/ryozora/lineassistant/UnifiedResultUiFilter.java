@@ -104,7 +104,9 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
                 if (result == null || result.startsWith("受け取ったよ：")) continue;
 
                 Style style = styleFor(input);
-                Map<String, Object> bubble = resultBubble(style, result);
+                Map<String, Object> bubble = weatherCommandService.isWeatherCommand(input)
+                        ? weatherBubble(style, result)
+                        : resultBubble(style, result);
                 replyFlex(event.path("replyToken").asText(), style.title(), bubble, quickReply(style));
                 response.setStatus(HttpServletResponse.SC_OK);
                 return;
@@ -122,24 +124,16 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
     }
 
     private String resultFor(String userId, String input) {
-        if (weatherCommandService.isWeatherCommand(input)) {
-            return weatherCommandService.handle(userId, input);
-        }
-        if (expenseService.supports(input)) {
-            return expenseService.handle(userId, input);
-        }
-        if (habitService.supports(input)) {
-            return habitService.handle(userId, input);
-        }
-        if (rpgService.supports(input)) {
-            return rpgService.handle(userId, input);
-        }
+        if (weatherCommandService.isWeatherCommand(input)) return weatherCommandService.handle(userId, input);
+        if (expenseService.supports(input)) return expenseService.handle(userId, input);
+        if (habitService.supports(input)) return habitService.handle(userId, input);
+        if (rpgService.supports(input)) return rpgService.handle(userId, input);
         return commandService.handle(userId, input);
     }
 
     private Style styleFor(String input) {
         if (weatherCommandService.isWeatherCommand(input)) {
-            return new Style("天気", "対象地域と取得元も表示", "#3B82C4", "#E5F3FF", "予定メニュー");
+            return new Style("天気", "", "#3B82C4", "#E5F3FF", "予定メニュー");
         }
         if (Set.of("家計簿", "家計簿一覧", "支出一覧", "今日いくら", "今日の支出", "今月いくら", "今月の支出", "カテゴリ別", "支出カテゴリ").contains(input)) {
             return new Style("お金・家計簿", "支出と集計", "#D88916", "#FFF2DE", "お金メニュー");
@@ -156,6 +150,78 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
         return new Style("ベンリー", "情報をまとめて表示", "#526D82", "#F1F5F9", "ホーム");
     }
 
+    private Map<String, Object> weatherBubble(Style style, String raw) {
+        List<String> lines = raw.lines().map(String::strip).filter(v -> !v.isBlank()).toList();
+        String title = firstMatching(lines, v -> v.contains("今日の天気") || v.contains("明日の天気"), "天気");
+        String area = valueAfter(lines, "対象地域：", "");
+        String condition = firstMatching(lines, v -> !v.contains("天気") && !v.contains("対象地域")
+                && (v.contains("晴") || v.contains("くもり") || v.contains("雨") || v.contains("雪")), "");
+        String temperatures = firstMatching(lines, v -> v.startsWith("最高 "), "");
+        String current = firstMatching(lines, v -> v.startsWith("現在 "), "");
+        String rainProbability = firstMatching(lines, v -> v.contains("降水確率"), "");
+        String rainTiming = firstMatching(lines, v -> v.startsWith("雨は "), "");
+        String advice = firstMatching(lines, v -> v.startsWith("🥵") || v.startsWith("👕") || v.startsWith("🧥")
+                || v.startsWith("🌂") || v.startsWith("🧺") || v.startsWith("✨"), "");
+        String source = valueAfter(lines, "取得元：", "Open-Meteo");
+        String updated = valueAfter(lines, "取得時刻：", "");
+
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", vertical(style.headerBackground(), "12px", "sm", List.of(
+                text(title, "xl", "bold", style.accent(), "start"),
+                text(area.isBlank() ? "" : area, "xs", "regular", "#617184", "start")
+        ).stream().filter(c -> !"".equals(c.get("text"))).toList()));
+
+        List<Map<String, Object>> contents = new ArrayList<>();
+        List<Map<String, Object>> main = new ArrayList<>();
+        if (!condition.isBlank()) main.add(text(condition, "lg", "bold", "#243B53", "start"));
+        if (!current.isBlank()) main.add(text(current, "md", "bold", "#334E68", "start"));
+        if (!temperatures.isBlank()) main.add(text(temperatures, "sm", "regular", "#526D82", "start"));
+        contents.add(groupBox("#F4F8FD", main));
+
+        List<Map<String, Object>> rain = new ArrayList<>();
+        if (!rainTiming.isBlank()) rain.add(text(rainTiming, "md", "bold", "#2E6FC4", "start"));
+        if (!rainProbability.isBlank()) rain.add(text(rainProbability, "sm", "regular", "#526D82", "start"));
+        if (!rain.isEmpty()) contents.add(groupBox("#EEF6FF", rain));
+
+        if (!advice.isBlank()) {
+            contents.add(groupBox("#FFF8E8", List.of(text(advice, "sm", "bold", "#72551E", "start"))));
+        }
+
+        String meta = "取得元：" + source + (updated.isBlank() ? "" : "　更新：" + updated);
+        contents.add(text(meta, "xxs", "regular", "#8A96A6", "start"));
+        contents.add(horizontal(List.of(
+                button("関連", style.backMessage(), style.accent()),
+                button("🏠 ホーム", "ホーム", "#8592A6")
+        )));
+        bubble.put("body", vertical("#FCFDFE", "12px", "sm", contents));
+        return bubble;
+    }
+
+    private String firstMatching(List<String> lines, java.util.function.Predicate<String> predicate, String fallback) {
+        return lines.stream().filter(predicate).findFirst().orElse(fallback);
+    }
+
+    private String valueAfter(List<String> lines, String prefix, String fallback) {
+        return lines.stream().filter(v -> v.startsWith(prefix)).findFirst()
+                .map(v -> v.substring(prefix.length()).strip()).orElse(fallback);
+    }
+
+    private Map<String, Object> groupBox(String background, List<Map<String, Object>> contents) {
+        Map<String, Object> box = new LinkedHashMap<>();
+        box.put("type", "box");
+        box.put("layout", "vertical");
+        box.put("backgroundColor", background);
+        box.put("cornerRadius", "12px");
+        box.put("paddingAll", "12px");
+        box.put("spacing", "xs");
+        box.put("contents", contents.isEmpty()
+                ? List.of(text("情報を取得できなかったよ", "sm", "regular", "#526D82", "start"))
+                : contents);
+        return box;
+    }
+
     private Map<String, Object> resultBubble(Style style, String raw) {
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
@@ -163,8 +229,7 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
 
         List<String> lines = raw.lines().map(String::stripTrailing).toList();
         String first = lines.stream().filter(v -> !v.isBlank() && !isDivider(v)).findFirst().orElse(style.title());
-
-        bubble.put("header", vertical(style.headerBackground(), List.of(
+        bubble.put("header", vertical(style.headerBackground(), "14px", "md", List.of(
                 text(first, "xl", "bold", style.accent(), "start"),
                 text(style.subtitle(), "xs", "regular", "#617184", "start")
         )));
@@ -190,31 +255,21 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
                 contents.add(text("ほかの情報は関連画面から確認してね", "xs", "regular", "#7A8798", "start"));
                 break;
             }
-            contents.add(lineCard(value, style));
+            contents.add(lineCard(value));
             visible++;
         }
-        if (contents.isEmpty()) {
-            contents.add(text("表示できる情報はまだないよ", "md", "regular", "#526D82", "center"));
-        }
+        if (contents.isEmpty()) contents.add(text("表示できる情報はまだないよ", "md", "regular", "#526D82", "center"));
         contents.add(button("関連メニュー", style.backMessage(), style.accent()));
         contents.add(button("🏠 ホーム", "ホーム", "#8592A6"));
-        bubble.put("body", vertical("#FCFDFE", contents));
+        bubble.put("body", vertical("#FCFDFE", "16px", "md", contents));
         return bubble;
     }
 
-    private Map<String, Object> lineCard(String value, Style style) {
-        String color = value.contains("期限切れ") || value.contains("削除") || value.contains("注意")
-                ? "#B54752" : "#334E68";
+    private Map<String, Object> lineCard(String value) {
+        String color = value.contains("期限切れ") || value.contains("削除") || value.contains("注意") ? "#B54752" : "#334E68";
         String weight = value.startsWith("【") || value.startsWith("■") || value.startsWith("□")
                 || value.matches("^\\d+[.．].*") ? "bold" : "regular";
-        Map<String, Object> card = new LinkedHashMap<>();
-        card.put("type", "box");
-        card.put("layout", "vertical");
-        card.put("backgroundColor", "#F5F8FC");
-        card.put("cornerRadius", "12px");
-        card.put("paddingAll", "12px");
-        card.put("contents", List.of(text(value, "sm", weight, color, "start")));
-        return card;
+        return groupBox("#F5F8FC", List.of(text(value, "sm", weight, color, "start")));
     }
 
     private Map<String, Object> quickReply(Style style) {
@@ -225,13 +280,23 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
         ));
     }
 
-    private Map<String, Object> vertical(String background, List<Map<String, Object>> contents) {
+    private Map<String, Object> vertical(String background, String padding, String spacing,
+                                         List<Map<String, Object>> contents) {
         Map<String, Object> box = new LinkedHashMap<>();
         box.put("type", "box");
         box.put("layout", "vertical");
         box.put("backgroundColor", background);
-        box.put("paddingAll", "16px");
-        box.put("spacing", "md");
+        box.put("paddingAll", padding);
+        box.put("spacing", spacing);
+        box.put("contents", contents);
+        return box;
+    }
+
+    private Map<String, Object> horizontal(List<Map<String, Object>> contents) {
+        Map<String, Object> box = new LinkedHashMap<>();
+        box.put("type", "box");
+        box.put("layout", "horizontal");
+        box.put("spacing", "sm");
         box.put("contents", contents);
         return box;
     }
@@ -254,6 +319,8 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
         button.put("style", "primary");
         button.put("height", "sm");
         button.put("color", color);
+        button.put("flex", 1);
+        button.put("adjustMode", "shrink-to-fit");
         button.put("action", Map.of("type", "message", "label", label, "text", message));
         return button;
     }
@@ -263,9 +330,7 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
     }
 
     private Map<String, Object> quick(String label, String message) {
-        return Map.of("type", "action", "action", Map.of(
-                "type", "message", "label", label, "text", message
-        ));
+        return Map.of("type", "action", "action", Map.of("type", "message", "label", label, "text", message));
     }
 
     private void replyFlex(String replyToken, String altText, Map<String, Object> bubble,
@@ -286,9 +351,7 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
         HttpResponse<Void> result = client.send(request, HttpResponse.BodyHandlers.discarding());
-        if (result.statusCode() / 100 != 2) {
-            throw new IllegalStateException("LINE API error: HTTP " + result.statusCode());
-        }
+        if (result.statusCode() / 100 != 2) throw new IllegalStateException("LINE API error: HTTP " + result.statusCode());
     }
 
     private boolean isDivider(String value) {
