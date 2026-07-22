@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 @Service
 public class SnoozeService {
     private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
-    private static final Pattern COMMAND = Pattern.compile("^スヌーズ\\s+(10|30|明日)\\s+(\\d+)$");
+    private static final Pattern COMMAND = Pattern.compile("^スヌーズ\\s+(5|10|30|明日)\\s+(\\d+)$");
     private final JdbcTemplate jdbc;
 
     public SnoozeService(JdbcTemplate jdbc) {
