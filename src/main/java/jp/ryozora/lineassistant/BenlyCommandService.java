@@ -20,7 +20,7 @@ public class BenlyCommandService {
     }
 
     public String handle(String userId, String raw) {
-        String text = raw == null ? "" : raw.strip();
+        String text = normalize(raw);
         store.ensureUser(userId);
 
         if (text.equals("ヘルプ") || text.equalsIgnoreCase("help") || text.equals("使い方")) {
@@ -88,6 +88,14 @@ public class BenlyCommandService {
             return ZonedDateTime.now(TOKYO).format(DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss"));
         }
         return "受け取ったよ：『" + text + "』\n\n『ヘルプ』でコマンド一覧が見られるよ！";
+    }
+
+    private String normalize(String raw) {
+        if (raw == null) return "";
+        return raw
+                .replace('\u3000', ' ')
+                .replaceAll("[\\t\\n\\r ]+", " ")
+                .strip();
     }
 
     private String addSchedule(String userId, String input) {
