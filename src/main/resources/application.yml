@@ -1,6 +1,17 @@
 spring:
   application:
     name: my-line-assistant
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:mem:benly;MODE=PostgreSQL;DB_CLOSE_DELAY=-1}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 20000
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
 
 server:
   port: ${PORT:8080}
@@ -10,6 +21,9 @@ management:
     web:
       exposure:
         include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
 
 line:
   bot:
