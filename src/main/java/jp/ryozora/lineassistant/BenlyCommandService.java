@@ -35,6 +35,43 @@ public class BenlyCommandService {
         if (text.equals("メモ") || text.equals("メモ一覧")) {
             return formatItems("メモ一覧", store.listMemos(userId), "メモはまだないよ！");
         }
+        if (text.startsWith("メモ検索 ")) {
+            String keyword = text.substring(5).strip();
+            if (keyword.isBlank()) return "例：メモ検索 牛乳 のように送ってね！";
+            return formatItems("『" + keyword + "』の検索結果", store.searchMemos(userId, keyword), "見つからんかった！");
+        }
+        if (text.startsWith("メモ削除 ")) {
+            Long id = parseId(text.substring(5));
+            if (id == null) return "例：メモ削除 3 のように送ってね！";
+            return store.deleteMemo(userId, id)
+                    ? "メモ #" + id + " を削除したよ！"
+                    : "そのメモは見つからんかった！";
+        }
+        if (text.startsWith("メモ編集 ")) {
+            IdAndText input = parseIdAndText(text.substring(5));
+            if (input == null) return "例：メモ編集 3 牛乳を2本買う のように送ってね！";
+            return store.editMemo(userId, input.id(), input.text())
+                    ? "メモ #" + input.id() + " を書き直したよ！\n" + input.text()
+                    : "そのメモは見つからんかった！";
+        }
+        if (text.startsWith("お気に入り ") || text.startsWith("メモお気に入り ")) {
+            String value = text.startsWith("メモお気に入り ") ? text.substring(8) : text.substring(6);
+            Long id = parseId(value);
+            if (id == null) return "例：お気に入り 3 のように送ってね！";
+            Boolean favorite = store.toggleMemoFavorite(userId, id);
+            if (favorite == null) return "そのメモは見つからんかった！";
+            return favorite ? "メモ #" + id + " をお気に入りにしたよ！★"
+                    : "メモ #" + id + " のお気に入りを外したよ！";
+        }
+        if (text.startsWith("タグ ") || text.startsWith("メモタグ ")) {
+            String value = text.startsWith("メモタグ ") ? text.substring(5) : text.substring(3);
+            IdAndText input = parseIdAndText(value);
+            if (input == null) return "例：タグ 3 買い物,重要 のように送ってね！";
+            String tags = input.text().replace("＃", "").replace("#", "").replace("、", ",");
+            return store.setMemoTags(userId, input.id(), tags)
+                    ? "メモ #" + input.id() + " にタグを付けたよ！\n#" + tags.replace(",", " #")
+                    : "そのメモは見つからんかった！";
+        }
         if (text.equals("メモ全削除")) {
             int count = store.clearMemos(userId);
             return count == 0 ? "消すメモはなかったよ！" : "メモを" + count + "件、全部片づけたよ！";
@@ -144,11 +181,27 @@ public class BenlyCommandService {
         }
     }
 
+    private IdAndText parseIdAndText(String value) {
+        String stripped = value.strip();
+        int space = stripped.indexOf(' ');
+        if (space <= 0 || space == stripped.length() - 1) return null;
+        Long id = parseId(stripped.substring(0, space));
+        String content = stripped.substring(space + 1).strip();
+        if (id == null || content.isBlank()) return null;
+        return new IdAndText(id, content);
+    }
+
     private String help() {
         return """
                 ベンリーで使えるコマンド
                 ・メモ 牛乳を買う
                 ・メモ一覧
+                ・メモ検索 牛乳
+                ・メモ編集 1 牛乳を2本買う
+                ・メモ削除 1
+                ・お気に入り 1
+                ・タグ 1 買い物,重要
+                ・メモ全削除
                 ・タスク 部屋を片づける
                 ・タスク一覧
                 ・完了 1
@@ -161,4 +214,6 @@ public class BenlyCommandService {
                 ・時刻
                 """.strip();
     }
+
+    private record IdAndText(long id, String text) {}
 }
