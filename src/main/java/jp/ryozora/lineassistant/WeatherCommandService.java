@@ -2,10 +2,15 @@ package jp.ryozora.lineassistant;
 
 import org.springframework.stereotype.Service;
 
+import java.time.ZonedDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 @Service
 public class WeatherCommandService {
+    private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
+    private static final String WEATHER_SOURCE = "Open-Meteo";
+
     private final NotificationStore notificationStore;
     private final WeatherService weatherService;
 
@@ -27,6 +32,7 @@ public class WeatherCommandService {
         int dayOffset = text.contains("明日") || text.contains("あした") || text.contains("あす") ? 1 : 0;
         NotificationStore.Settings settings = notificationStore.get(userId);
         WeatherService.Forecast forecast = weatherService.fetch(settings.latitude(), settings.longitude(), dayOffset);
+        ZonedDateTime fetchedAt = ZonedDateTime.now(TOKYO);
 
         String dayLabel = dayOffset == 1 ? "明日" : "今日";
         String icon = icon(forecast.weatherCode());
@@ -55,8 +61,8 @@ public class WeatherCommandService {
                     : "🧺 外干しはちょっと注意した方がよさそう！\n");
         }
 
-        out.append("\n").append(icon).append(" ").append(dayLabel).append("の天気（")
-                .append(settings.area()).append("）\n")
+        out.append("\n").append(icon).append(" ").append(dayLabel).append("の天気\n")
+                .append("対象地域：").append(settings.area()).append("\n")
                 .append(condition).append("\n")
                 .append("最高 ").append(Math.round(forecast.maxTemperature())).append("℃ / 最低 ")
                 .append(Math.round(forecast.minTemperature())).append("℃\n")
@@ -71,6 +77,8 @@ public class WeatherCommandService {
                     .append("からの可能性あり");
         }
         out.append("\n\n").append(advice(forecast));
+        out.append("\n\n取得元：").append(WEATHER_SOURCE)
+                .append("\n取得時刻：").append(fetchedAt.format(DateTimeFormatter.ofPattern("M/d H:mm")));
         return out.toString();
     }
 
