@@ -26,6 +26,7 @@ public class LineWebhookController {
     private final NaturalLanguageService naturalLanguageService;
     private final PrivacyCommandService privacyCommandService;
     private final NotificationCommandService notificationCommandService;
+    private final WeatherCommandService weatherCommandService;
     private final HttpClient client = HttpClient.newHttpClient();
 
     public LineWebhookController(
@@ -34,7 +35,8 @@ public class LineWebhookController {
             BenlyCommandService commandService,
             NaturalLanguageService naturalLanguageService,
             PrivacyCommandService privacyCommandService,
-            NotificationCommandService notificationCommandService
+            NotificationCommandService notificationCommandService,
+            WeatherCommandService weatherCommandService
     ) {
         this.props = props;
         this.mapper = mapper;
@@ -42,17 +44,19 @@ public class LineWebhookController {
         this.naturalLanguageService = naturalLanguageService;
         this.privacyCommandService = privacyCommandService;
         this.notificationCommandService = notificationCommandService;
+        this.weatherCommandService = weatherCommandService;
     }
 
     @GetMapping("/")
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.4.2",
+                "version", "0.5.0",
                 "status", "running",
                 "storage", "postgresql",
                 "naturalLanguage", "rule-based",
-                "notifications", "enabled"
+                "notifications", "enabled",
+                "weather", "enabled"
         );
     }
 
@@ -95,6 +99,11 @@ public class LineWebhookController {
 
                 if (notificationCommandService.isSettingsCommand(input)) {
                     replyNotificationSettings(replyToken, notificationCommandService.process(userId, input));
+                    continue;
+                }
+
+                if (weatherCommandService.isWeatherCommand(input)) {
+                    replyText(replyToken, weatherCommandService.handle(userId, input));
                     continue;
                 }
 
@@ -168,17 +177,19 @@ public class LineWebhookController {
         bubble.put("header", box("#FFF2B8", "20px", List.of(
                 text("BENLY QUEST", "xs", "bold", "#9B7B2F", "center"),
                 text("今日なにする？", "xl", "bold", "#4A3F35", "center"),
-                text("使いたいボタンをタップしてね", "sm", "regular", "#75685C", "center")
+                text("予定・天気・通知もここから使えるよ", "sm", "regular", "#75685C", "center")
         )));
         bubble.put("body", box("#FFFDF8", "16px", List.of(
+                buttonRow(button("📅 今日の予定", "今日の予定", "#91BCE8"), button("➕ 予定追加", "明日19時 ", "#78AEE8")),
+                buttonRow(button("☀️ 今日の天気", "今日の天気", "#F0B65A"), button("🌤 明日の天気", "明日の天気", "#E4A95A")),
                 buttonRow(button("📝 メモ", "メモ一覧", "#F5A9B8"), button("✅ タスク", "タスク一覧", "#8FD3C7")),
-                buttonRow(button("🛒 買い物", "買い物一覧", "#F5C27A"), button("📅 予定", "今日の予定", "#91BCE8")),
-                buttonRow(button("🔔 通知設定", "通知設定", "#A9C8F5"), button("⭐ 経験値", "経験値", "#C7A7E8")),
-                buttonRow(button("➕ メモ追加", "メモ ", "#ECAFC4"), button("➕ タスク追加", "タスク ", "#A7DDD4")),
+                buttonRow(button("🛒 買い物", "買い物一覧", "#F5C27A"), button("🔔 通知設定", "通知設定", "#A9C8F5")),
+                buttonRow(button("⭐ 経験値", "経験値", "#C7A7E8"), button("❓ ヘルプ", "ヘルプ", "#7F91B5")),
                 buttonRow(button("🔐 プライバシー", "プライバシー", "#B8C4D9"), button("🗂 自分のデータ", "自分のデータ", "#C9B8D9"))
         )));
         bubble.put("footer", box("#F7F0E8", "12px", List.of(
-                text("困ったら「ヘルプ」", "xs", "regular", "#75685C", "center")
+                button("❓ 使い方を見る", "ヘルプ", "#7F91B5"),
+                text("どの返信にも下の「ヘルプ」ボタンが表示されるよ", "xs", "regular", "#75685C", "center")
         )));
         return bubble;
     }
@@ -197,7 +208,8 @@ public class LineWebhookController {
                 toggleButton("☔ 雨通知", "雨", settings.rain(), "#4A90D9"),
                 toggleButton("📅 予定通知", "予定", settings.schedule(), "#668FD8"),
                 toggleButton("⏰ タスク通知", "タスク", settings.task(), "#4AAE9E"),
-                toggleButton("🌙 夜通知", "夜", settings.night(), "#7765B5")
+                toggleButton("🌙 夜通知", "夜", settings.night(), "#7765B5"),
+                button("❓ 通知の使い方", "予定ヘルプ", "#7F91B5")
         )));
         return bubble;
     }
@@ -252,14 +264,15 @@ public class LineWebhookController {
 
     private Map<String, Object> quickReplyMenu() {
         return Map.of("items", List.of(
+                quickReply("❓ ヘルプ", "ヘルプ"),
                 quickReply("🏠 ホーム", "ホーム"),
+                quickReply("☀️ 天気", "今日の天気"),
+                quickReply("📅 予定", "今日の予定"),
                 quickReply("📝 メモ", "メモ一覧"),
                 quickReply("✅ タスク", "タスク一覧"),
                 quickReply("🛒 買い物", "買い物一覧"),
-                quickReply("📅 予定", "今日の予定"),
                 quickReply("🔔 通知", "通知設定"),
-                quickReply("🔐 個人情報", "プライバシー"),
-                quickReply("❓ ヘルプ", "ヘルプ")
+                quickReply("🔐 個人情報", "プライバシー")
         ));
     }
 
