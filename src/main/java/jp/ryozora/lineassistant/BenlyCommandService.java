@@ -29,8 +29,8 @@ public class BenlyCommandService {
         if (text.startsWith("メモ ")) {
             String content = text.substring(3).strip();
             if (content.isBlank()) return "メモの内容も書いてなー！";
-            long id = store.addMemo(userId, content);
-            return "メモしたよ！\n#" + id + " " + content;
+            store.addMemo(userId, content);
+            return "メモしたよ！\n" + content + "\n\n『メモ一覧』で番号を確認できるよ。";
         }
         if (text.equals("メモ") || text.equals("メモ一覧")) {
             return formatItems("メモ一覧", store.listMemos(userId), "メモはまだないよ！");
@@ -38,38 +38,46 @@ public class BenlyCommandService {
         if (text.startsWith("メモ検索 ")) {
             String keyword = text.substring(5).strip();
             if (keyword.isBlank()) return "例：メモ検索 牛乳 のように送ってね！";
-            return formatItems("『" + keyword + "』の検索結果", store.searchMemos(userId, keyword), "見つからんかった！");
+            return formatMemoSearch(userId, keyword);
         }
         if (text.startsWith("メモ削除 ")) {
-            Long id = parseId(text.substring(5));
-            if (id == null) return "例：メモ削除 3 のように送ってね！";
+            Long number = parseId(text.substring(5));
+            if (number == null) return "例：メモ削除 3 のように送ってね！";
+            Long id = memoIdByNumber(userId, number);
+            if (id == null) return "その番号のメモは見つからんかった！\n『メモ一覧』で番号を確認してね。";
             return store.deleteMemo(userId, id)
-                    ? "メモ #" + id + " を削除したよ！"
+                    ? "メモ No." + number + " を削除したよ！\n残りの番号は自動で詰め直したで。"
                     : "そのメモは見つからんかった！";
         }
         if (text.startsWith("メモ編集 ")) {
             IdAndText input = parseIdAndText(text.substring(5));
             if (input == null) return "例：メモ編集 3 牛乳を2本買う のように送ってね！";
-            return store.editMemo(userId, input.id(), input.text())
-                    ? "メモ #" + input.id() + " を書き直したよ！\n" + input.text()
+            Long id = memoIdByNumber(userId, input.id());
+            if (id == null) return "その番号のメモは見つからんかった！\n『メモ一覧』で番号を確認してね。";
+            return store.editMemo(userId, id, input.text())
+                    ? "メモ No." + input.id() + " を書き直したよ！\n" + input.text()
                     : "そのメモは見つからんかった！";
         }
         if (text.startsWith("お気に入り ") || text.startsWith("メモお気に入り ")) {
             String value = text.startsWith("メモお気に入り ") ? text.substring(8) : text.substring(6);
-            Long id = parseId(value);
-            if (id == null) return "例：お気に入り 3 のように送ってね！";
+            Long number = parseId(value);
+            if (number == null) return "例：お気に入り 3 のように送ってね！";
+            Long id = memoIdByNumber(userId, number);
+            if (id == null) return "その番号のメモは見つからんかった！\n『メモ一覧』で番号を確認してね。";
             Boolean favorite = store.toggleMemoFavorite(userId, id);
             if (favorite == null) return "そのメモは見つからんかった！";
-            return favorite ? "メモ #" + id + " をお気に入りにしたよ！★"
-                    : "メモ #" + id + " のお気に入りを外したよ！";
+            return favorite ? "メモ No." + number + " をお気に入りにしたよ！★\n一覧の上へ移動するで。"
+                    : "メモ No." + number + " のお気に入りを外したよ！";
         }
         if (text.startsWith("タグ ") || text.startsWith("メモタグ ")) {
             String value = text.startsWith("メモタグ ") ? text.substring(5) : text.substring(3);
             IdAndText input = parseIdAndText(value);
             if (input == null) return "例：タグ 3 買い物,重要 のように送ってね！";
+            Long id = memoIdByNumber(userId, input.id());
+            if (id == null) return "その番号のメモは見つからんかった！\n『メモ一覧』で番号を確認してね。";
             String tags = input.text().replace("＃", "").replace("#", "").replace("、", ",");
-            return store.setMemoTags(userId, input.id(), tags)
-                    ? "メモ #" + input.id() + " にタグを付けたよ！\n#" + tags.replace(",", " #")
+            return store.setMemoTags(userId, id, tags)
+                    ? "メモ No." + input.id() + " にタグを付けたよ！\n#" + tags.replace(",", " #")
                     : "そのメモは見つからんかった！";
         }
         if (text.equals("メモ全削除")) {
@@ -127,6 +135,31 @@ public class BenlyCommandService {
         return "受け取ったよ：『" + text + "』\n\n『ヘルプ』で機能別メニューが見られるよ！";
     }
 
+    private Long memoIdByNumber(String userId, long number) {
+        if (number < 1 || number > Integer.MAX_VALUE) return null;
+        List<BenlyStore.Item> items = store.listMemos(userId);
+        int index = (int) number - 1;
+        return index < items.size() ? items.get(index).id() : null;
+    }
+
+    private String formatMemoSearch(String userId, String keyword) {
+        List<BenlyStore.Item> all = store.listMemos(userId);
+        List<BenlyStore.Item> matches = store.searchMemos(userId, keyword);
+        if (matches.isEmpty()) return "見つからんかった！";
+        StringBuilder out = new StringBuilder("『").append(keyword).append("』の検索結果\n");
+        for (BenlyStore.Item match : matches) {
+            int index = -1;
+            for (int i = 0; i < all.size(); i++) {
+                if (all.get(i).id() == match.id()) {
+                    index = i;
+                    break;
+                }
+            }
+            if (index >= 0) out.append("No.").append(index + 1).append(" ").append(match.text()).append("\n");
+        }
+        return out.toString().stripTrailing();
+    }
+
     private String featureHelp(String text) {
         return switch (text) {
             case "ヘルプ", "使い方", "コマンド", "メニュー" -> mainHelp();
@@ -158,7 +191,7 @@ public class BenlyCommandService {
                 ⚙️ その他
                 「その他ヘルプ」
 
-                使いたい機能名＋「ヘルプ」と送ってね！
+                下のボタンからも選べるよ！
                 """.strip();
     }
 
@@ -179,6 +212,8 @@ public class BenlyCommandService {
                 【削除】
                 ・メモ削除 1
                 ・メモ全削除
+
+                ※番号はメモ一覧に表示される No.1、No.2…を使ってね。
                 """.strip();
     }
 
@@ -233,16 +268,11 @@ public class BenlyCommandService {
 
     private String normalize(String raw) {
         if (raw == null) return "";
-        return raw
-                .replace('\u3000', ' ')
-                .replaceAll("[\\t\\n\\r ]+", " ")
-                .strip();
+        return raw.replace('\u3000', ' ').replaceAll("[\\t\\n\\r ]+", " ").strip();
     }
 
     private String addSchedule(String userId, String input) {
-        if (input.length() < 18) {
-            return "予定はこの形で送ってね！\n予定 2026-07-23 19:00 歯医者";
-        }
+        if (input.length() < 18) return "予定はこの形で送ってね！\n予定 2026-07-23 19:00 歯医者";
         try {
             LocalDateTime local = LocalDateTime.parse(input.substring(0, 16), SCHEDULE_INPUT);
             String title = input.substring(16).strip();
@@ -259,11 +289,8 @@ public class BenlyCommandService {
         if (items.isEmpty()) return "今日の予定はなし！のびのびいこー！";
         StringBuilder out = new StringBuilder("今日の予定\n");
         for (BenlyStore.ScheduleItem item : items) {
-            out.append("・")
-                    .append(item.startsAt().format(DateTimeFormatter.ofPattern("HH:mm")))
-                    .append(" ")
-                    .append(item.title())
-                    .append("\n");
+            out.append("・").append(item.startsAt().format(DateTimeFormatter.ofPattern("HH:mm")))
+                    .append(" ").append(item.title()).append("\n");
         }
         return out.toString().stripTrailing();
     }
@@ -271,15 +298,15 @@ public class BenlyCommandService {
     private String formatItems(String title, List<BenlyStore.Item> items, String emptyText) {
         if (items.isEmpty()) return emptyText;
         StringBuilder out = new StringBuilder(title).append("\n");
-        for (BenlyStore.Item item : items) {
-            out.append("#").append(item.id()).append(" ").append(item.text()).append("\n");
+        for (int i = 0; i < items.size(); i++) {
+            out.append("No.").append(i + 1).append(" ").append(items.get(i).text()).append("\n");
         }
         return out.toString().stripTrailing();
     }
 
     private Long parseId(String value) {
         try {
-            return Long.parseLong(value.strip().replace("#", ""));
+            return Long.parseLong(value.strip().replace("#", "").replace("No.", "").replace("no.", ""));
         } catch (NumberFormatException e) {
             return null;
         }
