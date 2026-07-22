@@ -18,29 +18,34 @@ import java.util.Map;
 
 @RestController
 public class LineWebhookController {
+    private static final int MAX_WEBHOOK_BODY_BYTES = 256_000;
+
     private final LineProperties props;
     private final ObjectMapper mapper;
     private final BenlyCommandService commandService;
     private final NaturalLanguageService naturalLanguageService;
+    private final PrivacyCommandService privacyCommandService;
     private final HttpClient client = HttpClient.newHttpClient();
 
     public LineWebhookController(
             LineProperties props,
             ObjectMapper mapper,
             BenlyCommandService commandService,
-            NaturalLanguageService naturalLanguageService
+            NaturalLanguageService naturalLanguageService,
+            PrivacyCommandService privacyCommandService
     ) {
         this.props = props;
         this.mapper = mapper;
         this.commandService = commandService;
         this.naturalLanguageService = naturalLanguageService;
+        this.privacyCommandService = privacyCommandService;
     }
 
     @GetMapping("/")
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.4.0",
+                "version", "0.4.1",
                 "status", "running",
                 "storage", "postgresql",
                 "naturalLanguage", "rule-based"
@@ -52,6 +57,9 @@ public class LineWebhookController {
             @RequestHeader(value = "x-line-signature", required = false) String signature,
             @RequestBody String body
     ) {
+        if (body.getBytes(StandardCharsets.UTF_8).length > MAX_WEBHOOK_BODY_BYTES) {
+            return ResponseEntity.status(413).build();
+        }
         if (!validSignature(body, signature)) return ResponseEntity.status(401).build();
 
         try {
@@ -65,6 +73,12 @@ public class LineWebhookController {
 
                 String replyToken = event.path("replyToken").asText();
                 String input = event.path("message").path("text").asText().strip();
+
+                String privacyResponse = privacyCommandService.handle(userId, input);
+                if (privacyResponse != null) {
+                    replyText(replyToken, privacyResponse);
+                    continue;
+                }
 
                 if (isHomeCommand(input)) {
                     replyFlex(replyToken);
@@ -83,7 +97,8 @@ public class LineWebhookController {
             }
             return ResponseEntity.ok().build();
         } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid LINE webhook", e);
+            // Do not include the webhook body or user message in logs/exceptions.
+            throw new IllegalArgumentException("Invalid LINE webhook payload", e);
         }
     }
 
@@ -150,22 +165,11 @@ public class LineWebhookController {
         body.put("paddingAll", "16px");
         body.put("spacing", "md");
         body.put("contents", List.of(
-                buttonRow(
-                        button("📝 メモ", "メモ一覧", "#F5A9B8"),
-                        button("✅ タスク", "タスク一覧", "#8FD3C7")
-                ),
-                buttonRow(
-                        button("🛒 買い物", "買い物一覧", "#F5C27A"),
-                        button("📅 予定", "今日の予定", "#91BCE8")
-                ),
-                buttonRow(
-                        button("⭐ 経験値", "経験値", "#C7A7E8"),
-                        button("🎮 アプリ", "アプリ", "#9FD19F")
-                ),
-                buttonRow(
-                        button("➕ メモ追加", "メモ ", "#ECAFC4"),
-                        button("➕ タスク追加", "タスク ", "#A7DDD4")
-                )
+                buttonRow(button("📝 メモ", "メモ一覧", "#F5A9B8"), button("✅ タスク", "タスク一覧", "#8FD3C7")),
+                buttonRow(button("🛒 買い物", "買い物一覧", "#F5C27A"), button("📅 予定", "今日の予定", "#91BCE8")),
+                buttonRow(button("⭐ 経験値", "経験値", "#C7A7E8"), button("🎮 アプリ", "アプリ", "#9FD19F")),
+                buttonRow(button("➕ メモ追加", "メモ ", "#ECAFC4"), button("➕ タスク追加", "タスク ", "#A7DDD4")),
+                buttonRow(button("🔐 プライバシー", "プライバシー", "#B8C4D9"), button("🗂 自分のデータ", "自分のデータ", "#C9B8D9"))
         ));
         bubble.put("body", body);
 
@@ -174,9 +178,7 @@ public class LineWebhookController {
         footer.put("layout", "vertical");
         footer.put("backgroundColor", "#F7F0E8");
         footer.put("paddingAll", "12px");
-        footer.put("contents", List.of(
-                text("困ったら「ヘルプ」", "xs", "regular", "#75685C", "center")
-        ));
+        footer.put("contents", List.of(text("困ったら「ヘルプ」", "xs", "regular", "#75685C", "center")));
         bubble.put("footer", footer);
         return bubble;
     }
@@ -225,6 +227,7 @@ public class LineWebhookController {
                 quickReply("✅ タスク", "タスク一覧"),
                 quickReply("🛒 買い物", "買い物一覧"),
                 quickReply("📅 予定", "今日の予定"),
+                quickReply("🔐 個人情報", "プライバシー"),
                 quickReply("❓ ヘルプ", "ヘルプ")
         ));
     }
@@ -251,7 +254,7 @@ public class LineWebhookController {
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
-                throw new IllegalStateException("LINE API error: " + response.statusCode() + " " + response.body());
+                throw new IllegalStateException("LINE API error: " + response.statusCode());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
