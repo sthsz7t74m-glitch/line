@@ -12,6 +12,7 @@ import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,7 +37,7 @@ public class LineWebhookController {
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.2.0",
+                "version", "0.2.1",
                 "status", "running",
                 "storage", "postgresql"
         );
@@ -96,9 +97,21 @@ public class LineWebhookController {
     private void reply(String replyToken, String text) {
         try {
             String safeText = text.length() > 5000 ? text.substring(0, 5000) : text;
+
+            Map<String, Object> message = new LinkedHashMap<>();
+            message.put("type", "text");
+            message.put("text", safeText);
+            message.put("quickReply", Map.of("items", List.of(
+                    quickReply("📝 メモ", "メモ一覧"),
+                    quickReply("✅ タスク", "タスク一覧"),
+                    quickReply("🛒 買い物", "買い物一覧"),
+                    quickReply("📅 今日の予定", "今日の予定"),
+                    quickReply("❓ ヘルプ", "ヘルプ")
+            )));
+
             String json = mapper.writeValueAsString(Map.of(
                     "replyToken", replyToken,
-                    "messages", List.of(Map.of("type", "text", "text", safeText))
+                    "messages", List.of(message)
             ));
 
             HttpRequest request = HttpRequest.newBuilder(
@@ -121,5 +134,16 @@ public class LineWebhookController {
         } catch (Exception e) {
             throw new IllegalStateException("Reply failed", e);
         }
+    }
+
+    private Map<String, Object> quickReply(String label, String text) {
+        return Map.of(
+                "type", "action",
+                "action", Map.of(
+                        "type", "message",
+                        "label", label,
+                        "text", text
+                )
+        );
     }
 }
