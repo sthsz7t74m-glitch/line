@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 public class RichMenuPostbackUpgradeService {
     private static final Logger log = LoggerFactory.getLogger(RichMenuPostbackUpgradeService.class);
-    private static final String MENU_NAME = "Benly Postback v1";
+    private static final String MENU_NAME = "Benly Message v1";
     private static final String API = "https://api.line.me/v2/bot";
     private static final String DATA_API = "https://api-data.line.me/v2/bot";
 
@@ -45,27 +45,28 @@ public class RichMenuPostbackUpgradeService {
         if (!attempted.compareAndSet(false, true) || tokenMissing()) return;
         try {
             upgrade();
-            log.info("Benly postback rich menu is ready");
+            log.info("Benly message rich menu is ready");
         } catch (Exception e) {
-            log.warn("Benly postback rich menu upgrade failed: {}", safe(e));
+            log.warn("Benly message rich menu recovery failed: {}", safe(e));
         }
     }
 
     public synchronized String upgrade() throws Exception {
         JsonNode menus = listMenus();
-        String existingPostback = null;
+        String existing = null;
         String sourceId = null;
         for (JsonNode menu : menus) {
             String name = menu.path("name").asText();
             String id = menu.path("richMenuId").asText();
-            if (MENU_NAME.equals(name)) existingPostback = id;
-            if (sourceId == null && name.startsWith("Benly Main")) sourceId = id;
+            if (MENU_NAME.equals(name)) existing = id;
+            if (sourceId == null && name.startsWith("Benly")) sourceId = id;
         }
-        if (existingPostback != null) {
-            activate(existingPostback);
-            return existingPostback;
+
+        if (existing != null) {
+            activate(existing);
+            return existing;
         }
-        if (sourceId == null) throw new IllegalStateException("Japanese Benly rich menu was not found");
+        if (sourceId == null) throw new IllegalStateException("Benly rich menu image source was not found");
 
         byte[] image = getImage(sourceId);
         String id = createMenu();
@@ -87,12 +88,13 @@ public class RichMenuPostbackUpgradeService {
         body.put("name", MENU_NAME);
         body.put("chatBarText", "ベンリーを開く");
         body.put("areas", areas());
+
         HttpResponse<String> response = sendText(HttpRequest.newBuilder(URI.create(API + "/richmenu"))
                 .header("Authorization", bearer())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body), StandardCharsets.UTF_8))
                 .build());
-        requireSuccess(response, "create postback rich menu");
+        requireSuccess(response, "create message rich menu");
         String id = mapper.readTree(response.body()).path("richMenuId").asText();
         if (id.isBlank()) throw new IllegalStateException("LINE returned no richMenuId");
         return id;
@@ -110,18 +112,17 @@ public class RichMenuPostbackUpgradeService {
     }
 
     private Map<String, Object> area(int x, int y, int width, int height, String label, String command) {
-        String data = "cmd=" + java.net.URLEncoder.encode(command, StandardCharsets.UTF_8);
         return Map.of(
                 "bounds", Map.of("x", x, "y", y, "width", width, "height", height),
-                "action", Map.of("type", "postback", "label", label, "data", data)
+                "action", Map.of("type", "message", "label", label, "text", command)
         );
     }
 
     private void activate(String id) throws Exception {
-        postEmpty(URI.create(API + "/user/all/richmenu/" + id), "set default postback menu");
+        postEmpty(URI.create(API + "/user/all/richmenu/" + id), "set default message menu");
         if (props.ownerUserId() != null && !props.ownerUserId().isBlank()) {
             postEmpty(URI.create(API + "/user/" + props.ownerUserId() + "/richmenu/" + id),
-                    "link postback menu to owner");
+                    "link message menu to owner");
         }
     }
 
@@ -148,7 +149,7 @@ public class RichMenuPostbackUpgradeService {
                 .header("Authorization", bearer())
                 .header("Content-Type", "image/png")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(image)).build());
-        requireSuccess(response, "upload postback rich menu image");
+        requireSuccess(response, "upload message rich menu image");
     }
 
     private void postEmpty(URI uri, String operation) throws Exception {
@@ -161,7 +162,9 @@ public class RichMenuPostbackUpgradeService {
         try {
             int status = connection.getResponseCode();
             String body = readBody(connection, status);
-            if (status / 100 != 2) throw new IllegalStateException(operation + " failed: HTTP " + status + " " + body);
+            if (status / 100 != 2) {
+                throw new IllegalStateException(operation + " failed: HTTP " + status + " " + body);
+            }
         } finally {
             connection.disconnect();
         }
@@ -170,16 +173,16 @@ public class RichMenuPostbackUpgradeService {
     private String readBody(HttpURLConnection connection, int status) throws Exception {
         InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
         if (stream == null) return "";
-        try (stream) { return new String(stream.readAllBytes(), StandardCharsets.UTF_8); }
+        try (stream) {
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private void deleteOtherBenlyMenus(String keepId) throws Exception {
         for (JsonNode menu : listMenus()) {
             String id = menu.path("richMenuId").asText();
             String name = menu.path("name").asText();
-            if (!keepId.equals(id) && (name.startsWith("Benly Main") || name.startsWith("Benly Postback"))) {
-                deleteMenu(id);
-            }
+            if (!keepId.equals(id) && name.startsWith("Benly")) deleteMenu(id);
         }
     }
 
@@ -187,7 +190,9 @@ public class RichMenuPostbackUpgradeService {
         try {
             sendText(HttpRequest.newBuilder(URI.create(API + "/richmenu/" + id))
                     .header("Authorization", bearer()).DELETE().build());
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            // Best-effort cleanup only.
+        }
     }
 
     private HttpResponse<String> sendText(HttpRequest request) throws Exception {
@@ -205,8 +210,14 @@ public class RichMenuPostbackUpgradeService {
         }
     }
 
-    private String bearer() { return "Bearer " + props.channelAccessToken(); }
-    private boolean tokenMissing() { return props.channelAccessToken() == null || props.channelAccessToken().isBlank(); }
+    private String bearer() {
+        return "Bearer " + props.channelAccessToken();
+    }
+
+    private boolean tokenMissing() {
+        return props.channelAccessToken() == null || props.channelAccessToken().isBlank();
+    }
+
     private String safe(Throwable e) {
         String value = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
         return value.replaceAll("[\\r\\n\\t]+", " ").strip();
