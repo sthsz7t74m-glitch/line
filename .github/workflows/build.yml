@@ -21,5 +21,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Compile application
-        run: mvn -B -Dmaven.test.skip=true package
+      - name: Run unit tests
+        run: mvn -B test
+      - name: Package application
+        run: mvn -B -DskipTests package
