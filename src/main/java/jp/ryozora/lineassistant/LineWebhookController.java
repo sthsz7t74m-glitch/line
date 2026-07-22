@@ -72,7 +72,7 @@ public class LineWebhookController {
     public Map<String, String> index() {
         return Map.ofEntries(
                 Map.entry("app", "benly"),
-                Map.entry("version", "0.11.0"),
+                Map.entry("version", "0.11.1"),
                 Map.entry("status", "running"),
                 Map.entry("storage", "postgresql"),
                 Map.entry("naturalLanguage", "rule-based"),
@@ -115,6 +115,10 @@ public class LineWebhookController {
                 }
                 if (isHomeCommand(input)) {
                     replyHome(replyToken);
+                    continue;
+                }
+                if (isCategoryMenuCommand(input)) {
+                    replyCategoryMenu(replyToken, input);
                     continue;
                 }
                 if (isHelpCommand(input)) {
@@ -186,6 +190,13 @@ public class LineWebhookController {
         return input.equals("ホーム") || input.equals("ベンリー") || input.equals("トップ");
     }
 
+    private boolean isCategoryMenuCommand(String input) {
+        return input.equals("予定メニュー") || input.equals("今日メニュー")
+                || input.equals("記録メニュー") || input.equals("メモタスクメニュー")
+                || input.equals("お金メニュー") || input.equals("家計メニュー")
+                || input.equals("成長メニュー") || input.equals("習慣メニュー");
+    }
+
     private boolean isHelpCommand(String input) {
         return input.equals("ヘルプ") || input.equals("使い方") || input.equals("コマンド")
                 || input.equals("メニュー") || input.equalsIgnoreCase("help");
@@ -217,7 +228,19 @@ public class LineWebhookController {
     }
 
     private void replyHome(String replyToken) {
-        sendFlex(replyToken, "ベンリー冒険者ホーム", homeBubble());
+        sendFlex(replyToken, "ベンリーのカテゴリホーム", homeBubble());
+    }
+
+    private void replyCategoryMenu(String replyToken, String input) {
+        if (input.equals("予定メニュー") || input.equals("今日メニュー")) {
+            sendFlex(replyToken, "今日と予定のメニュー", scheduleMenuBubble());
+        } else if (input.equals("記録メニュー") || input.equals("メモタスクメニュー")) {
+            sendFlex(replyToken, "メモとタスクのメニュー", recordMenuBubble());
+        } else if (input.equals("お金メニュー") || input.equals("家計メニュー")) {
+            sendFlex(replyToken, "お金と買い物のメニュー", moneyMenuBubble());
+        } else {
+            sendFlex(replyToken, "習慣と成長のメニュー", growthMenuBubble());
+        }
     }
 
     private void replyHelp(String replyToken) {
@@ -242,24 +265,101 @@ public class LineWebhookController {
         bubble.put("type", "bubble");
         bubble.put("size", "mega");
         bubble.put("header", box("#E8DEFF", "18px", List.of(
-                text("ベンリー冒険者ホーム", "xl", "bold", "#493D69", "center"),
-                text("用事・お金・習慣をまとめて管理", "sm", "regular", "#6D6287", "center"),
-                text("続けたいことは習慣に登録できるよ", "xs", "regular", "#756C86", "center")
+                text("ベンリー ホーム", "xl", "bold", "#493D69", "center"),
+                text("使いたい種類を選んでね", "sm", "regular", "#6D6287", "center")
         )));
-        bubble.put("body", box("#FCFAFF", "12px", List.of(
-                buttonRow(button("今日の習慣", "今日の習慣", "#55A77E"), button("習慣を追加", "習慣 ", "#76B899")),
-                buttonRow(button("今日のミッション", "今日のミッション", "#9A78D3"), button("プロフィール", "プロフィール", "#7E71BE")),
-                buttonRow(button("今日のまとめ", "今日のダッシュボード", "#80B8F0"), button("週間カレンダー", "カレンダー", "#6CA6E5")),
-                buttonRow(button("家計簿", "家計簿", "#66A98D"), button("統計", "統計", "#78B8A4")),
-                buttonRow(button("今月の支出", "今月いくら", "#5D9F88"), button("実績", "実績一覧", "#A995D8")),
-                buttonRow(button("予定一覧", "予定一覧", "#6CA6E5"), button("予定を追加", "明日19時 ", "#8DCAF1")),
-                buttonRow(button("メモ", "メモ一覧", "#EFA6C6"), button("タスク", "タスク一覧", "#78CDBB")),
-                buttonRow(button("買い物", "買い物一覧", "#F0B878"), button("今日の天気", "今日の天気", "#F2B95F")),
-                buttonRow(button("通知設定", "通知設定", "#9BB8EA"), button("使い方", "ヘルプ", "#AEBBCF"))
+        bubble.put("body", box("#FCFAFF", "14px", List.of(
+                buttonRow(button("今日・予定", "予定メニュー", "#6CA6E5"),
+                        button("メモ・タスク", "記録メニュー", "#78CDBB")),
+                buttonRow(button("お金・買い物", "お金メニュー", "#66A98D"),
+                        button("習慣・成長", "成長メニュー", "#9A78D3")),
+                buttonRow(button("通知設定", "通知設定", "#9BB8EA"),
+                        button("使い方", "ヘルプ", "#AEBBCF"))
         )));
         bubble.put("footer", box("#F2EEFA", "10px", List.of(
-                text("例：習慣 薬 毎日 21:00", "xs", "bold", "#6D6287", "center"),
-                text("曜日指定例：習慣 筋トレ 月水金 20:00", "xs", "regular", "#756C86", "center")
+                text("よく使う機能は下のボタンからも開けるよ", "xs", "regular", "#756C86", "center")
+        )));
+        return bubble;
+    }
+
+    private Map<String, Object> scheduleMenuBubble() {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#DDEBFF", "18px", List.of(
+                text("今日・予定", "xl", "bold", "#334E68", "center"),
+                text("今日の確認とスケジュール管理", "sm", "regular", "#526D82", "center")
+        )));
+        bubble.put("body", box("#FAFCFF", "14px", List.of(
+                buttonRow(button("今日まとめ", "今日のダッシュボード", "#80B8F0"),
+                        button("カレンダー", "カレンダー", "#6CA6E5")),
+                buttonRow(button("予定一覧", "予定一覧", "#668FD8"),
+                        button("予定追加", "明日19時 ", "#8DCAF1")),
+                buttonRow(button("今日の天気", "今日の天気", "#F2B95F"),
+                        button("通知設定", "通知設定", "#9BB8EA")),
+                button("ホームへ", "ホーム", "#8E9CB3")
+        )));
+        return bubble;
+    }
+
+    private Map<String, Object> recordMenuBubble() {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#DDF5EE", "18px", List.of(
+                text("メモ・タスク", "xl", "bold", "#315D50", "center"),
+                text("覚えておくことと、やること", "sm", "regular", "#52776C", "center")
+        )));
+        bubble.put("body", box("#F8FFFC", "14px", List.of(
+                buttonRow(button("メモ一覧", "メモ一覧", "#EFA6C6"),
+                        button("メモ追加", "メモ ", "#E9B3CB")),
+                buttonRow(button("タスク一覧", "タスク一覧", "#78CDBB"),
+                        button("タスク追加", "タスク ", "#8AD5C5")),
+                buttonRow(button("自分のデータ", "自分のデータ", "#AEBBCF"),
+                        button("統計", "統計", "#78B8A4")),
+                button("ホームへ", "ホーム", "#8E9CB3")
+        )));
+        return bubble;
+    }
+
+    private Map<String, Object> moneyMenuBubble() {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#DFF3E9", "18px", List.of(
+                text("お金・買い物", "xl", "bold", "#315D50", "center"),
+                text("支出と買うものをまとめて確認", "sm", "regular", "#52776C", "center")
+        )));
+        bubble.put("body", box("#FAFFFC", "14px", List.of(
+                buttonRow(button("家計簿", "家計簿", "#66A98D"),
+                        button("支出一覧", "支出一覧", "#5D9F88")),
+                buttonRow(button("今日の支出", "今日いくら", "#72B399"),
+                        button("今月の支出", "今月いくら", "#62A78E")),
+                buttonRow(button("カテゴリ別", "カテゴリ別", "#78B8A4"),
+                        button("買い物一覧", "買い物一覧", "#F0B878")),
+                button("ホームへ", "ホーム", "#8E9CB3")
+        )));
+        return bubble;
+    }
+
+    private Map<String, Object> growthMenuBubble() {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#EDE3FF", "18px", List.of(
+                text("習慣・成長", "xl", "bold", "#4D426B", "center"),
+                text("続けることとベンリーの成長", "sm", "regular", "#6D6287", "center")
+        )));
+        bubble.put("body", box("#FCFAFF", "14px", List.of(
+                buttonRow(button("今日の習慣", "今日の習慣", "#55A77E"),
+                        button("習慣追加", "習慣 ", "#76B899")),
+                buttonRow(button("ミッション", "今日のミッション", "#9A78D3"),
+                        button("プロフィール", "プロフィール", "#7E71BE")),
+                buttonRow(button("実績", "実績一覧", "#A995D8"),
+                        button("習慣記録", "習慣統計", "#6FAF9D")),
+                buttonRow(button("今週成績", "今週ランキング", "#E2A85D"),
+                        button("全体統計", "統計", "#78B8A4")),
+                button("ホームへ", "ホーム", "#8E9CB3")
         )));
         return bubble;
     }
@@ -270,17 +370,15 @@ public class LineWebhookController {
         bubble.put("size", "mega");
         bubble.put("header", box("#EDE3FF", "18px", List.of(
                 text("ベンリーの使い方", "xl", "bold", "#4D426B", "center"),
-                text("使いたい機能を選んでね", "sm", "regular", "#6D6287", "center")
+                text("知りたい種類を選んでね", "sm", "regular", "#6D6287", "center")
         )));
         bubble.put("body", box("#FCFAFF", "12px", List.of(
                 buttonRow(button("予定", "予定ヘルプ", "#7EAEE8"), button("天気", "天気ヘルプ", "#E7B45E")),
                 buttonRow(button("メモ", "メモヘルプ", "#ECAFC4"), button("タスク", "タスクヘルプ", "#82CDBF")),
                 buttonRow(button("買い物", "買い物ヘルプ", "#E9B86F"), button("家計簿", "家計簿ヘルプ", "#66A98D")),
                 buttonRow(button("習慣", "習慣ヘルプ", "#55A77E"), button("通知", "通知ヘルプ", "#9AB9E6")),
-                buttonRow(button("ミッション", "今日のミッション", "#9A78D3"), button("統計", "統計", "#78B8A4")),
-                buttonRow(button("プロフィール", "プロフィール", "#A995D8"), button("実績", "実績一覧", "#8E9CB3")),
-                buttonRow(button("カレンダー", "カレンダー", "#7EAEE8"), button("全コマンド", "コマンド一覧", "#BBA4DE")),
-                button("ホームへ戻る", "ホーム", "#8E9CB3")
+                button("全コマンド", "コマンド一覧", "#BBA4DE"),
+                button("ホームへ", "ホーム", "#8E9CB3")
         )));
         return bubble;
     }
@@ -336,6 +434,7 @@ public class LineWebhookController {
         button.put("height", "sm");
         button.put("color", color);
         button.put("flex", 1);
+        button.put("adjustMode", "shrink-to-fit");
         button.put("action", Map.of("type", "message", "label", label, "text", message));
         return button;
     }
@@ -355,14 +454,12 @@ public class LineWebhookController {
     private Map<String, Object> quickReplyMenu() {
         return Map.of("items", List.of(
                 quickReply("ホーム", "ホーム"),
-                quickReply("習慣", "今日の習慣"),
-                quickReply("家計簿", "家計簿"),
-                quickReply("ミッション", "今日のミッション"),
                 quickReply("今日", "今日のダッシュボード"),
-                quickReply("カレンダー", "カレンダー"),
-                quickReply("統計", "統計"),
                 quickReply("予定", "予定一覧"),
-                quickReply("プロフィール", "プロフィール"),
+                quickReply("タスク", "タスク一覧"),
+                quickReply("家計簿", "家計簿"),
+                quickReply("習慣", "今日の習慣"),
+                quickReply("ミッション", "今日のミッション"),
                 quickReply("通知", "通知設定")
         ));
     }
