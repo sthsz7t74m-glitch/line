@@ -25,6 +25,7 @@ public class LineWebhookController {
     private final BenlyCommandService commandService;
     private final NaturalLanguageService naturalLanguageService;
     private final PrivacyCommandService privacyCommandService;
+    private final NotificationCommandService notificationCommandService;
     private final HttpClient client = HttpClient.newHttpClient();
 
     public LineWebhookController(
@@ -32,23 +33,26 @@ public class LineWebhookController {
             ObjectMapper mapper,
             BenlyCommandService commandService,
             NaturalLanguageService naturalLanguageService,
-            PrivacyCommandService privacyCommandService
+            PrivacyCommandService privacyCommandService,
+            NotificationCommandService notificationCommandService
     ) {
         this.props = props;
         this.mapper = mapper;
         this.commandService = commandService;
         this.naturalLanguageService = naturalLanguageService;
         this.privacyCommandService = privacyCommandService;
+        this.notificationCommandService = notificationCommandService;
     }
 
     @GetMapping("/")
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.4.1",
+                "version", "0.4.2",
                 "status", "running",
                 "storage", "postgresql",
-                "naturalLanguage", "rule-based"
+                "naturalLanguage", "rule-based",
+                "notifications", "enabled"
         );
     }
 
@@ -73,6 +77,10 @@ public class LineWebhookController {
 
                 String replyToken = event.path("replyToken").asText();
                 String input = event.path("message").path("text").asText().strip();
+                if (input.length() > 1000) {
+                    replyText(replyToken, "メッセージが長すぎるよ。1000文字以内に分けて送ってね！");
+                    continue;
+                }
 
                 String privacyResponse = privacyCommandService.handle(userId, input);
                 if (privacyResponse != null) {
@@ -81,7 +89,12 @@ public class LineWebhookController {
                 }
 
                 if (isHomeCommand(input)) {
-                    replyFlex(replyToken);
+                    replyHome(replyToken);
+                    continue;
+                }
+
+                if (notificationCommandService.isSettingsCommand(input)) {
+                    replyNotificationSettings(replyToken, notificationCommandService.process(userId, input));
                     continue;
                 }
 
@@ -97,8 +110,7 @@ public class LineWebhookController {
             }
             return ResponseEntity.ok().build();
         } catch (Exception e) {
-            // Do not include the webhook body or user message in logs/exceptions.
-            throw new IllegalArgumentException("Invalid LINE webhook payload", e);
+            throw new IllegalArgumentException("Invalid LINE webhook payload");
         }
     }
 
@@ -119,7 +131,7 @@ public class LineWebhookController {
             String expected = Base64.getEncoder().encodeToString(mac.doFinal(body.getBytes(StandardCharsets.UTF_8)));
             return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), received.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
-            throw new IllegalStateException("Signature verification failed", e);
+            throw new IllegalStateException("Signature verification failed");
         }
     }
 
@@ -132,11 +144,19 @@ public class LineWebhookController {
         sendReply(replyToken, List.of(message));
     }
 
-    private void replyFlex(String replyToken) {
+    private void replyHome(String replyToken) {
+        sendFlex(replyToken, "ベンリーのホームメニュー", homeBubble());
+    }
+
+    private void replyNotificationSettings(String replyToken, NotificationStore.Settings settings) {
+        sendFlex(replyToken, "ベンリーの通知設定", notificationBubble(settings));
+    }
+
+    private void sendFlex(String replyToken, String altText, Map<String, Object> bubble) {
         Map<String, Object> flex = new LinkedHashMap<>();
         flex.put("type", "flex");
-        flex.put("altText", "ベンリーのホームメニュー");
-        flex.put("contents", homeBubble());
+        flex.put("altText", altText);
+        flex.put("contents", bubble);
         flex.put("quickReply", quickReplyMenu());
         sendReply(replyToken, List.of(flex));
     }
@@ -145,42 +165,57 @@ public class LineWebhookController {
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
         bubble.put("size", "mega");
-
-        Map<String, Object> header = new LinkedHashMap<>();
-        header.put("type", "box");
-        header.put("layout", "vertical");
-        header.put("backgroundColor", "#FFF2B8");
-        header.put("paddingAll", "20px");
-        header.put("contents", List.of(
+        bubble.put("header", box("#FFF2B8", "20px", List.of(
                 text("BENLY QUEST", "xs", "bold", "#9B7B2F", "center"),
                 text("今日なにする？", "xl", "bold", "#4A3F35", "center"),
                 text("使いたいボタンをタップしてね", "sm", "regular", "#75685C", "center")
-        ));
-        bubble.put("header", header);
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("type", "box");
-        body.put("layout", "vertical");
-        body.put("backgroundColor", "#FFFDF8");
-        body.put("paddingAll", "16px");
-        body.put("spacing", "md");
-        body.put("contents", List.of(
+        )));
+        bubble.put("body", box("#FFFDF8", "16px", List.of(
                 buttonRow(button("📝 メモ", "メモ一覧", "#F5A9B8"), button("✅ タスク", "タスク一覧", "#8FD3C7")),
                 buttonRow(button("🛒 買い物", "買い物一覧", "#F5C27A"), button("📅 予定", "今日の予定", "#91BCE8")),
-                buttonRow(button("⭐ 経験値", "経験値", "#C7A7E8"), button("🎮 アプリ", "アプリ", "#9FD19F")),
+                buttonRow(button("🔔 通知設定", "通知設定", "#A9C8F5"), button("⭐ 経験値", "経験値", "#C7A7E8")),
                 buttonRow(button("➕ メモ追加", "メモ ", "#ECAFC4"), button("➕ タスク追加", "タスク ", "#A7DDD4")),
                 buttonRow(button("🔐 プライバシー", "プライバシー", "#B8C4D9"), button("🗂 自分のデータ", "自分のデータ", "#C9B8D9"))
-        ));
-        bubble.put("body", body);
-
-        Map<String, Object> footer = new LinkedHashMap<>();
-        footer.put("type", "box");
-        footer.put("layout", "vertical");
-        footer.put("backgroundColor", "#F7F0E8");
-        footer.put("paddingAll", "12px");
-        footer.put("contents", List.of(text("困ったら「ヘルプ」", "xs", "regular", "#75685C", "center")));
-        bubble.put("footer", footer);
+        )));
+        bubble.put("footer", box("#F7F0E8", "12px", List.of(
+                text("困ったら「ヘルプ」", "xs", "regular", "#75685C", "center")
+        )));
         return bubble;
+    }
+
+    private Map<String, Object> notificationBubble(NotificationStore.Settings settings) {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#DDEBFF", "18px", List.of(
+                text("🔔 通知設定", "xl", "bold", "#334E68", "center"),
+                text("押すたびON/OFFが切り替わるよ", "sm", "regular", "#526D82", "center"),
+                text("天気地域：" + settings.area(), "xs", "regular", "#526D82", "center")
+        )));
+        bubble.put("body", box("#FAFCFF", "16px", List.of(
+                toggleButton("☀️ 朝通知", "朝", settings.morning(), "#E6A93A"),
+                toggleButton("☔ 雨通知", "雨", settings.rain(), "#4A90D9"),
+                toggleButton("📅 予定通知", "予定", settings.schedule(), "#668FD8"),
+                toggleButton("⏰ タスク通知", "タスク", settings.task(), "#4AAE9E"),
+                toggleButton("🌙 夜通知", "夜", settings.night(), "#7765B5")
+        )));
+        return bubble;
+    }
+
+    private Map<String, Object> box(String backgroundColor, String padding, List<Map<String, Object>> contents) {
+        Map<String, Object> box = new LinkedHashMap<>();
+        box.put("type", "box");
+        box.put("layout", "vertical");
+        box.put("backgroundColor", backgroundColor);
+        box.put("paddingAll", padding);
+        box.put("spacing", "md");
+        box.put("contents", contents);
+        return box;
+    }
+
+    private Map<String, Object> toggleButton(String label, String type, boolean enabled, String enabledColor) {
+        return button(label + "　" + (enabled ? "ON" : "OFF"), "通知切替 " + type,
+                enabled ? enabledColor : "#8B949C");
     }
 
     private Map<String, Object> buttonRow(Map<String, Object> left, Map<String, Object> right) {
@@ -193,18 +228,13 @@ public class LineWebhookController {
     }
 
     private Map<String, Object> button(String label, String message, String color) {
-        Map<String, Object> action = new LinkedHashMap<>();
-        action.put("type", "message");
-        action.put("label", label);
-        action.put("text", message);
-
         Map<String, Object> button = new LinkedHashMap<>();
         button.put("type", "button");
         button.put("style", "primary");
         button.put("height", "sm");
         button.put("color", color);
         button.put("flex", 1);
-        button.put("action", action);
+        button.put("action", Map.of("type", "message", "label", label, "text", message));
         return button;
     }
 
@@ -227,40 +257,35 @@ public class LineWebhookController {
                 quickReply("✅ タスク", "タスク一覧"),
                 quickReply("🛒 買い物", "買い物一覧"),
                 quickReply("📅 予定", "今日の予定"),
+                quickReply("🔔 通知", "通知設定"),
                 quickReply("🔐 個人情報", "プライバシー"),
                 quickReply("❓ ヘルプ", "ヘルプ")
         ));
     }
 
     private Map<String, Object> quickReply(String label, String text) {
-        return Map.of(
-                "type", "action",
-                "action", Map.of("type", "message", "label", label, "text", text)
-        );
+        return Map.of("type", "action", "action", Map.of(
+                "type", "message", "label", label, "text", text
+        ));
     }
 
     private void sendReply(String replyToken, List<Map<String, Object>> messages) {
         try {
-            String json = mapper.writeValueAsString(Map.of(
-                    "replyToken", replyToken,
-                    "messages", messages
-            ));
-
+            String json = mapper.writeValueAsString(Map.of("replyToken", replyToken, "messages", messages));
             HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.line.me/v2/bot/message/reply"))
                     .header("Authorization", "Bearer " + props.channelAccessToken())
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json))
                     .build();
-
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
             if (response.statusCode() / 100 != 2) {
-                throw new IllegalStateException("LINE API error: " + response.statusCode());
+                throw new IllegalStateException("LINE API error: HTTP " + response.statusCode());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException(e);
+            throw new IllegalStateException("Reply interrupted");
         } catch (Exception e) {
-            throw new IllegalStateException("Reply failed", e);
+            throw new IllegalStateException("Reply failed");
         }
     }
 }
