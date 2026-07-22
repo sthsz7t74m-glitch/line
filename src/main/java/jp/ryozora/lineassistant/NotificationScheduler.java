@@ -11,6 +11,7 @@ import java.util.List;
 public class NotificationScheduler {
     private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
     private static final ZoneOffset OFFSET = ZoneOffset.ofHours(9);
+    private static final String WEATHER_SOURCE = "Open-Meteo";
     private static final int ONE_MONTH_MINUTES = 30 * 24 * 60;
     private static final int ONE_WEEK_MINUTES = 7 * 24 * 60;
     private static final int ONE_DAY_MINUTES = 24 * 60;
@@ -66,7 +67,14 @@ public class NotificationScheduler {
                 WeatherService.Forecast forecast = weather.fetch(settings.latitude(), settings.longitude());
                 if (!forecast.rainSoon()) continue;
                 String time = forecast.rainAt().format(DateTimeFormatter.ofPattern("H時"));
-                push.push(userId, "雨のお知らせ\n" + time + "ごろから雨の可能性があるよ。\n傘を忘れずに！");
+                String message = "雨のお知らせ\n"
+                        + "対象地域：" + settings.area() + "\n"
+                        + "予報：" + time + "ごろから雨の可能性\n"
+                        + "降水確率：" + forecast.rainProbability() + "%\n"
+                        + "傘を忘れずに！\n\n"
+                        + "取得元：" + WEATHER_SOURCE + "\n"
+                        + "取得時刻：" + now.format(DateTimeFormatter.ofPattern("M/d H:mm"));
+                push.push(userId, message);
                 store.markRain(userId, now);
             } catch (RuntimeException ignored) {
                 // Keep scheduled jobs alive without exposing personal data.
