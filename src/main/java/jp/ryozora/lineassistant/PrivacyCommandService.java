@@ -7,10 +7,13 @@ public class PrivacyCommandService {
     public static final int MAX_MESSAGE_LENGTH = 1000;
     private final BenlyStore store;
     private final AiSecretaryService secretaryService;
+    private final HabitService habitService;
 
-    public PrivacyCommandService(BenlyStore store, AiSecretaryService secretaryService) {
+    public PrivacyCommandService(BenlyStore store, AiSecretaryService secretaryService,
+                                 HabitService habitService) {
         this.store = store;
         this.secretaryService = secretaryService;
+        this.habitService = habitService;
     }
 
     public String handle(String userId, String raw) {
@@ -41,18 +44,19 @@ public class PrivacyCommandService {
                 ・タスク：%d件
                 ・買い物：%d件
                 ・家計簿：%d件
+                ・習慣：%d件
                 ・予定：%d件
                 ・経験値履歴：%d件
 
                 内容そのものはここでは表示しません。
                 『全データ削除』で削除手続きに進めます。
                 """.formatted(s.memos(), s.tasks(), s.shoppingItems(), s.expenses(),
-                s.schedules(), s.experienceLogs()).strip();
+                habitService.countForUser(userId), s.schedules(), s.experienceLogs()).strip();
     }
 
     private String deleteAll(String userId) {
         store.deleteAllUserData(userId);
-        return "保存されていたメモ・タスク・買い物・家計簿・予定・設定・経験値履歴をすべて削除しました。";
+        return "保存されていたメモ・タスク・買い物・家計簿・習慣・予定・設定・経験値履歴をすべて削除しました。";
     }
 
     private String privacyPolicy() {
@@ -61,7 +65,7 @@ public class PrivacyCommandService {
 
                 【保存する情報】
                 ・LINE上の内部ユーザー識別子
-                ・入力したメモ、タスク、買い物、家計簿、予定
+                ・入力したメモ、タスク、買い物、家計簿、習慣、予定
                 ・通知設定、地域設定、経験値履歴
 
                 【利用目的】
