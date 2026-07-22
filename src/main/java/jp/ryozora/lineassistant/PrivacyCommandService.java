@@ -7,20 +7,26 @@ public class PrivacyCommandService {
     public static final int MAX_MESSAGE_LENGTH = 1000;
     private final BenlyStore store;
     private final AiSecretaryService secretaryService;
+    private final ContextualConversationService contextualService;
     private final ConversationalCommandService conversationalService;
+    private final NotificationPreferenceCommandService notificationPreferenceCommands;
     private final HabitService habitService;
     private final TaskService taskService;
     private final RichMenuSetupService richMenuSetupService;
 
     public PrivacyCommandService(BenlyStore store,
                                  AiSecretaryService secretaryService,
+                                 ContextualConversationService contextualService,
                                  ConversationalCommandService conversationalService,
+                                 NotificationPreferenceCommandService notificationPreferenceCommands,
                                  HabitService habitService,
                                  TaskService taskService,
                                  RichMenuSetupService richMenuSetupService) {
         this.store = store;
         this.secretaryService = secretaryService;
+        this.contextualService = contextualService;
         this.conversationalService = conversationalService;
+        this.notificationPreferenceCommands = notificationPreferenceCommands;
         this.habitService = habitService;
         this.taskService = taskService;
         this.richMenuSetupService = richMenuSetupService;
@@ -46,6 +52,13 @@ public class PrivacyCommandService {
                         + richMenuSetupService.diagnosticStatus(userId);
             }
         }
+
+        if (notificationPreferenceCommands.supports(text)) {
+            return notificationPreferenceCommands.handle(userId, text);
+        }
+
+        String contextualResponse = contextualService.handle(userId, text);
+        if (contextualResponse != null) return contextualResponse;
 
         // Deadline task phrases must be handled before schedule interpretation.
         if (taskService.supports(text)) {
@@ -103,6 +116,7 @@ public class PrivacyCommandService {
                 ・入力したメモ、タスク、買い物、家計簿、習慣、予定
                 ・通知設定、地域設定、経験値履歴
                 ・入力待ちの会話状態（最大20分で失効）
+                ・直前に表示した一覧の種類と番号（最大20分で失効）
 
                 【利用目的】
                 ベンリーの各機能と通知を提供するためだけに使います。
