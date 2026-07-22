@@ -1,0 +1,11 @@
+alter table user_settings add column if not exists morning_notification boolean not null default true;
+alter table user_settings add column if not exists rain_notification boolean not null default true;
+alter table user_settings add column if not exists schedule_notification boolean not null default true;
+alter table user_settings add column if not exists task_notification boolean not null default true;
+alter table user_settings add column if not exists night_notification boolean not null default false;
+alter table user_settings add column if not exists weather_latitude numeric(9,6) not null default 35.676200;
+alter table user_settings add column if not exists weather_longitude numeric(9,6) not null default 139.650300;
+alter table user_settings add column if not exists weather_area varchar(100) not null default '東京';
+alter table user_settings add column if not exists last_morning_notice date;
+alter table user_settings add column if not exists last_rain_notice_at timestamp;
+alter table user_settings add column if not exists last_night_notice date;
