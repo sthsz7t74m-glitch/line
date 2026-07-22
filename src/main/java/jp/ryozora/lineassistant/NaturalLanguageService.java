@@ -15,17 +15,16 @@ import java.util.regex.Pattern;
 public class NaturalLanguageService {
     private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
     private static final DateTimeFormatter SCHEDULE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-    private static final Pattern TIME = Pattern.compile("(?:(午前|午後)\\s*)?([01]?\\d|2[0-3])(?:時|:)([0-5]?\\d)?(?:分|半)?");
+    private static final Pattern TIME = Pattern.compile("(?:(午前|午後)\\s*)?([01]?\\d|2[0-3])(?:時|じ|:)([0-5]?\\d)?(?:分|ぷん|ふん)?(?:半|はん)?");
     private static final Pattern SLASH_DATE = Pattern.compile("(?<!\\d)(?:(\\d{4})[/-])?(\\d{1,2})[/-](\\d{1,2})(?!\\d)");
     private static final Pattern JP_DATE = Pattern.compile("(?:(\\d{4})年)?(\\d{1,2})月(\\d{1,2})日?");
-    private static final Pattern AFTER_MINUTES = Pattern.compile("(\\d{1,3})分後");
-    private static final Pattern AFTER_HOURS = Pattern.compile("(\\d{1,2})時間後");
-    private static final Pattern AFTER_DAYS = Pattern.compile("(\\d{1,3})日後");
+    private static final Pattern AFTER_MINUTES = Pattern.compile("(\\d{1,3})(?:分|ぷん|ふん)後");
+    private static final Pattern AFTER_HOURS = Pattern.compile("(\\d{1,2})(?:時間|じかん)後");
+    private static final Pattern AFTER_DAYS = Pattern.compile("(\\d{1,3})(?:日|にち)後");
 
     private static final Map<String, String> WORD_NORMALIZATIONS = new LinkedHashMap<>();
 
     static {
-        // Longer expressions first so shorter replacements do not break them.
         WORD_NORMALIZATIONS.put("しあさって", "明々後日");
         WORD_NORMALIZATIONS.put("明明後日", "明々後日");
         WORD_NORMALIZATIONS.put("あさって", "明後日");
@@ -185,7 +184,7 @@ public class NaturalLanguageService {
         String period = matcher.group(1);
         int hour = Integer.parseInt(matcher.group(2));
         String matched = matcher.group();
-        int minute = matched.endsWith("半") ? 30
+        int minute = matched.endsWith("半") || matched.endsWith("はん") ? 30
                 : matcher.group(3) == null || matcher.group(3).isBlank() ? 0 : Integer.parseInt(matcher.group(3));
         if ("午後".equals(period) && hour < 12) hour += 12;
         if ("午前".equals(period) && hour == 12) hour = 0;
