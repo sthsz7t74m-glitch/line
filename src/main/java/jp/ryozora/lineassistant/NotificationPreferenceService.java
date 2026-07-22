@@ -3,6 +3,7 @@ package jp.ryozora.lineassistant;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalTime;
 
 @Service
@@ -15,15 +16,18 @@ public class NotificationPreferenceService {
     }
 
     private void initialize() {
-        jdbc.execute("""
-                alter table user_settings
-                add column if not exists morning_notice_time time not null default '06:00',
-                add column if not exists night_notice_time time not null default '21:00',
-                add column if not exists quiet_start_time time not null default '23:00',
-                add column if not exists quiet_end_time time not null default '07:00',
-                add column if not exists quiet_hours_enabled boolean not null default false,
-                add column if not exists notifications_paused_until date
-                """);
+        // H2 does not accept multiple ADD COLUMN clauses in one ALTER TABLE.
+        // Execute each statement separately so startup tests and PostgreSQL both work.
+        addColumn("morning_notice_time time not null default '06:00'");
+        addColumn("night_notice_time time not null default '21:00'");
+        addColumn("quiet_start_time time not null default '23:00'");
+        addColumn("quiet_end_time time not null default '07:00'");
+        addColumn("quiet_hours_enabled boolean not null default false");
+        addColumn("notifications_paused_until date");
+    }
+
+    private void addColumn(String definition) {
+        jdbc.execute("alter table user_settings add column if not exists " + definition);
     }
 
     public Preferences get(String userId) {
@@ -73,7 +77,8 @@ public class NotificationPreferenceService {
 
     public void pauseTomorrow(String userId) {
         ensure(userId);
-        jdbc.update("update user_settings set notifications_paused_until = current_date + 1 where line_user_id = ?", userId);
+        jdbc.update("update user_settings set notifications_paused_until = ? where line_user_id = ?",
+                LocalDate.now().plusDays(1), userId);
     }
 
     public void resume(String userId) {
@@ -83,7 +88,7 @@ public class NotificationPreferenceService {
 
     public boolean isAllowedNow(String userId, LocalTime now) {
         Preferences p = get(userId);
-        if (p.pausedUntil() != null && !java.time.LocalDate.now().isAfter(p.pausedUntil())) return false;
+        if (p.pausedUntil() != null && !LocalDate.now().isAfter(p.pausedUntil())) return false;
         return !p.quietEnabled() || !NotificationTimeParser.isQuiet(now, p.quietStart(), p.quietEnd());
     }
 
@@ -94,5 +99,5 @@ public class NotificationPreferenceService {
 
     public record Preferences(LocalTime morning, LocalTime night, LocalTime quietStart,
                               LocalTime quietEnd, boolean quietEnabled,
-                              java.time.LocalDate pausedUntil) {}
+                              LocalDate pausedUntil) {}
 }
