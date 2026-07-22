@@ -28,6 +28,8 @@ public class LineWebhookController {
     private final NotificationCommandService notificationCommandService;
     private final WeatherCommandService weatherCommandService;
     private final AdvancedScheduleService advancedScheduleService;
+    private final HelpCommandService helpCommandService;
+    private final SnoozeService snoozeService;
     private final HttpClient client = HttpClient.newHttpClient();
 
     public LineWebhookController(LineProperties props, ObjectMapper mapper,
@@ -36,7 +38,9 @@ public class LineWebhookController {
                                  PrivacyCommandService privacyCommandService,
                                  NotificationCommandService notificationCommandService,
                                  WeatherCommandService weatherCommandService,
-                                 AdvancedScheduleService advancedScheduleService) {
+                                 AdvancedScheduleService advancedScheduleService,
+                                 HelpCommandService helpCommandService,
+                                 SnoozeService snoozeService) {
         this.props = props;
         this.mapper = mapper;
         this.commandService = commandService;
@@ -45,13 +49,15 @@ public class LineWebhookController {
         this.notificationCommandService = notificationCommandService;
         this.weatherCommandService = weatherCommandService;
         this.advancedScheduleService = advancedScheduleService;
+        this.helpCommandService = helpCommandService;
+        this.snoozeService = snoozeService;
     }
 
     @GetMapping("/")
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.6.1",
+                "version", "0.7.1",
                 "status", "running",
                 "storage", "postgresql",
                 "naturalLanguage", "rule-based",
@@ -98,6 +104,14 @@ public class LineWebhookController {
                 }
                 if (isHelpCommand(input)) {
                     replyHelp(replyToken);
+                    continue;
+                }
+                if (helpCommandService.supports(input)) {
+                    replyText(replyToken, helpCommandService.handle(input));
+                    continue;
+                }
+                if (snoozeService.supports(input)) {
+                    replyText(replyToken, snoozeService.handle(userId, input));
                     continue;
                 }
                 if (notificationCommandService.isSettingsCommand(input)) {
@@ -222,13 +236,14 @@ public class LineWebhookController {
         bubble.put("size", "mega");
         bubble.put("header", box("#EDE3FF", "18px", List.of(
                 text("ベンリーの使い方", "xl", "bold", "#4D426B", "center"),
-                text("知りたい機能を選んでね", "sm", "regular", "#6D6287", "center")
+                text("現在使える機能から選んでね", "sm", "regular", "#6D6287", "center")
         )));
         bubble.put("body", box("#FCFAFF", "12px", List.of(
                 buttonRow(button("予定", "予定ヘルプ", "#7EAEE8"), button("天気", "天気ヘルプ", "#E7B45E")),
                 buttonRow(button("メモ", "メモヘルプ", "#ECAFC4"), button("タスク", "タスクヘルプ", "#82CDBF")),
                 buttonRow(button("買い物", "買い物ヘルプ", "#E9B86F"), button("通知", "通知ヘルプ", "#9AB9E6")),
-                buttonRow(button("個人データ", "プライバシー", "#AAB8CF"), button("ホームへ戻る", "ホーム", "#BBA4DE"))
+                buttonRow(button("その他", "その他ヘルプ", "#AAB8CF"), button("全コマンド", "コマンド一覧", "#BBA4DE")),
+                button("ホームへ戻る", "ホーム", "#8E9CB3")
         )));
         bubble.put("footer", box("#F2EEFA", "10px", List.of(
                 text("自然な文章でも使えるよ", "xs", "bold", "#6D6287", "center"),
