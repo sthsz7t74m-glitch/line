@@ -17,6 +17,8 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -36,15 +38,17 @@ public class RichMenuSetupService {
     }
 
     private static final Logger log = LoggerFactory.getLogger(RichMenuSetupService.class);
-    private static final String MENU_NAME = "Benly Main v3";
+    private static final String MENU_NAME = "Benly Main v4";
     private static final String API = "https://api.line.me/v2/bot";
     private static final String DATA_API = "https://api-data.line.me/v2/bot";
     private static final int WIDTH = 2500;
     private static final int HEIGHT = 1686;
+    private static final int HTTP_TIMEOUT_MILLIS = 20_000;
 
     private final LineProperties props;
     private final ObjectMapper mapper;
     private final HttpClient client = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
     private final boolean autoSetup;
@@ -415,12 +419,10 @@ public class RichMenuSetupService {
     }
 
     private void setDefault(String richMenuId) throws Exception {
-        HttpResponse<String> response = sendText(HttpRequest.newBuilder(
-                        URI.create(API + "/user/all/richmenu/" + richMenuId))
-                .header("Authorization", bearer())
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build());
-        requireSuccess(response, "set default rich menu");
+        postEmptyWithFixedLength(
+                URI.create(API + "/user/all/richmenu/" + richMenuId),
+                "set default rich menu"
+        );
     }
 
     private String getDefaultMenuId() throws Exception {
@@ -435,12 +437,10 @@ public class RichMenuSetupService {
     }
 
     private void linkUser(String userId, String richMenuId) throws Exception {
-        HttpResponse<String> response = sendText(HttpRequest.newBuilder(
-                        URI.create(API + "/user/" + userId + "/richmenu/" + richMenuId))
-                .header("Authorization", bearer())
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build());
-        requireSuccess(response, "link rich menu to user");
+        postEmptyWithFixedLength(
+                URI.create(API + "/user/" + userId + "/richmenu/" + richMenuId),
+                "link rich menu to user"
+        );
     }
 
     private String getLinkedMenuId(String userId) throws Exception {
@@ -452,6 +452,36 @@ public class RichMenuSetupService {
         requireSuccess(response, "get user rich menu");
         String id = mapper.readTree(response.body()).path("richMenuId").asText();
         return id.isBlank() ? null : id;
+    }
+
+    private void postEmptyWithFixedLength(URI uri, String operation) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
+        connection.setConnectTimeout(HTTP_TIMEOUT_MILLIS);
+        connection.setReadTimeout(HTTP_TIMEOUT_MILLIS);
+        connection.setUseCaches(false);
+        connection.setInstanceFollowRedirects(false);
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Authorization", bearer());
+        connection.setRequestProperty("Content-Type", "application/octet-stream");
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setDoOutput(true);
+        connection.setFixedLengthStreamingMode(0);
+
+        try {
+            int statusCode = connection.getResponseCode();
+            String body = readResponseBody(connection, statusCode);
+            requireSuccess(statusCode, body, operation);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private String readResponseBody(HttpURLConnection connection, int statusCode) throws Exception {
+        InputStream stream = statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream();
+        if (stream == null) return "";
+        try (stream) {
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private void unlinkUserQuietly(String userId) {
@@ -517,11 +547,15 @@ public class RichMenuSetupService {
     }
 
     private void requireSuccess(HttpResponse<String> response, String operation) {
-        if (response.statusCode() / 100 != 2) {
-            String body = response.body() == null ? "" : response.body();
+        requireSuccess(response.statusCode(), response.body(), operation);
+    }
+
+    private void requireSuccess(int statusCode, String responseBody, String operation) {
+        if (statusCode / 100 != 2) {
+            String body = responseBody == null ? "" : responseBody;
             body = body.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").strip();
             if (body.length() > 400) body = body.substring(0, 400);
-            throw new IllegalStateException(operation + " failed: HTTP " + response.statusCode()
+            throw new IllegalStateException(operation + " failed: HTTP " + statusCode
                     + (body.isBlank() ? "" : " " + body));
         }
     }
