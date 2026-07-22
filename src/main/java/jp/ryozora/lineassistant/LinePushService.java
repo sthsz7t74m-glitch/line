@@ -49,10 +49,13 @@ public class LinePushService {
         )));
         bubble.put("footer", box("#EEF5FF", "12px", List.of(
                 buttonRow(
-                        button("あと10分", "スヌーズ 10 " + scheduleId, "#7EAEE8"),
-                        button("あと30分", "スヌーズ 30 " + scheduleId, "#8FC0E8")
+                        button("あと5分", "スヌーズ 5 " + scheduleId, "#71A7DD"),
+                        button("あと10分", "スヌーズ 10 " + scheduleId, "#7EAEE8")
                 ),
-                button("明日にする", "スヌーズ 明日 " + scheduleId, "#A995D8")
+                buttonRow(
+                        button("あと30分", "スヌーズ 30 " + scheduleId, "#8FC0E8"),
+                        button("明日にする", "スヌーズ 明日 " + scheduleId, "#A995D8")
+                )
         )));
 
         Map<String, Object> flex = new LinkedHashMap<>();
