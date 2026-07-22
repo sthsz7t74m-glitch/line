@@ -188,10 +188,10 @@ public class BenlyStore {
                 where line_user_id = ? and starts_at >= ? and starts_at < ?
                 order by starts_at
                 """, (rs, rowNum) -> new ScheduleItem(
-                        rs.getLong("id"),
-                        rs.getString("title"),
-                        rs.getTimestamp("starts_at").toInstant().atOffset(offset)
-                ), userId, Timestamp.from(start.toInstant()), Timestamp.from(end.toInstant()));
+                rs.getLong("id"),
+                rs.getString("title"),
+                rs.getTimestamp("starts_at").toInstant().atOffset(offset)
+        ), userId, Timestamp.from(start.toInstant()), Timestamp.from(end.toInstant()));
     }
 
     public int experience(String userId) {
@@ -204,6 +204,36 @@ public class BenlyStore {
         return value == null ? 0 : value;
     }
 
+    public DataSummary dataSummary(String userId) {
+        ensureUser(userId);
+        return new DataSummary(
+                count("memos", userId),
+                count("tasks", userId),
+                count("shopping_items", userId),
+                count("schedules", userId),
+                count("experience_logs", userId)
+        );
+    }
+
+    private int count(String table, String userId) {
+        // table name is selected only from hard-coded constants in this class; user input is never used as SQL syntax.
+        Integer value = jdbc.queryForObject("select count(*) from " + table + " where line_user_id = ?", Integer.class, userId);
+        return value == null ? 0 : value;
+    }
+
+    @Transactional
+    public void deleteAllUserData(String userId) {
+        // Every value is bound as a parameter. No user-provided text is concatenated into SQL.
+        jdbc.update("delete from experience_logs where line_user_id = ?", userId);
+        jdbc.update("delete from schedules where line_user_id = ?", userId);
+        jdbc.update("delete from shopping_items where line_user_id = ?", userId);
+        jdbc.update("delete from tasks where line_user_id = ?", userId);
+        jdbc.update("delete from memos where line_user_id = ?", userId);
+        jdbc.update("delete from locations where line_user_id = ?", userId);
+        jdbc.update("delete from user_settings where line_user_id = ?", userId);
+        jdbc.update("delete from benly_users where line_user_id = ?", userId);
+    }
+
     private void addExperience(String userId, int points, String reason) {
         ensureUser(userId);
         jdbc.update("update benly_users set experience = experience + ?, updated_at = current_timestamp where line_user_id = ?",
@@ -214,4 +244,5 @@ public class BenlyStore {
 
     public record Item(long id, String text) {}
     public record ScheduleItem(long id, String title, OffsetDateTime startsAt) {}
+    public record DataSummary(int memos, int tasks, int shoppingItems, int schedules, int experienceLogs) {}
 }
