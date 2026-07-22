@@ -16,13 +16,16 @@ public class NotificationScheduler {
     private final NotificationDataStore dataStore;
     private final WeatherService weather;
     private final LinePushService push;
+    private final AiSecretaryService secretary;
 
     public NotificationScheduler(NotificationStore store, NotificationDataStore dataStore,
-                                 WeatherService weather, LinePushService push) {
+                                 WeatherService weather, LinePushService push,
+                                 AiSecretaryService secretary) {
         this.store = store;
         this.dataStore = dataStore;
         this.weather = weather;
         this.push = push;
+        this.secretary = secretary;
     }
 
     @Scheduled(cron = "0 0 6 * * *", zone = "Asia/Tokyo")
@@ -30,14 +33,7 @@ public class NotificationScheduler {
         LocalDate today = LocalDate.now(TOKYO);
         for (String userId : store.morningUsers(today)) {
             try {
-                NotificationStore.Settings settings = store.get(userId);
-                WeatherService.Forecast forecast = weather.fetch(settings.latitude(), settings.longitude());
-                String rain = forecast.dailyRainProbability() >= 40
-                        ? "\n降水確率 " + forecast.dailyRainProbability() + "%　傘があると安心！"
-                        : "\n雨の心配は少なめだよ。";
-                push.push(userId, "おはよう！\n" + settings.area() + "の天気\n"
-                        + "最高 " + Math.round(forecast.maxTemperature()) + "℃ / 最低 "
-                        + Math.round(forecast.minTemperature()) + "℃" + rain);
+                push.pushMorningBriefing(userId, secretary.morningBriefing(userId));
                 store.markMorning(userId, today);
             } catch (RuntimeException ignored) {
                 // Do not expose user content or identifiers in scheduled-job logs.
