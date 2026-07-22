@@ -93,6 +93,27 @@ public class NotificationScheduler {
     }
 
     @Scheduled(cron = "0 */1 * * * *", zone = "Asia/Tokyo")
+    public void sendTaskNotifications() {
+        OffsetDateTime now = OffsetDateTime.now(OFFSET).withSecond(0).withNano(0);
+        List<NotificationDataStore.UpcomingTask> tasks =
+                dataStore.upcomingTasks(now.minusMinutes(1), now.plusMinutes(ONE_MONTH_MINUTES + 1L));
+        for (NotificationDataStore.UpcomingTask task : tasks) {
+            for (int minutes : taskReminderMinutes(task.reminderMinutes())) {
+                OffsetDateTime notifyAt = task.dueAt().minusMinutes(minutes).withSecond(0).withNano(0);
+                if (notifyAt.isBefore(now.minusSeconds(30)) || notifyAt.isAfter(now.plusSeconds(30))) continue;
+                String key = task.id() + ":" + minutes;
+                if (!dataStore.reserveDelivery(task.userId(), "TASK", key)) continue;
+                try {
+                    push.pushTaskReminder(task.userId(), task.id(), task.title(), task.priority(),
+                            task.dueAt(), minutes);
+                } catch (RuntimeException ignored) {
+                    // Keep task content and user identifiers out of scheduler logs.
+                }
+            }
+        }
+    }
+
+    @Scheduled(cron = "0 */1 * * * *", zone = "Asia/Tokyo")
     public void sendHabitNotifications() {
         LocalDateTime now = LocalDateTime.now(TOKYO).withSecond(0).withNano(0);
         for (HabitService.HabitReminder habit : habitService.dueReminders(now)) {
@@ -118,27 +139,22 @@ public class NotificationScheduler {
             normalized = normalized.substring(2);
         }
 
-        return java.util.Arrays.stream(normalized.split(","))
+        return parseReminderValues(normalized);
+    }
+
+    private int[] taskReminderMinutes(String raw) {
+        if (raw != null && raw.isBlank()) return new int[0];
+        return parseReminderValues(raw == null ? "1440,60,0" : raw);
+    }
+
+    private int[] parseReminderValues(String raw) {
+        return java.util.Arrays.stream(raw.split(","))
                 .map(String::strip)
                 .filter(v -> v.matches("\\d{1,5}"))
                 .mapToInt(Integer::parseInt)
                 .filter(v -> v >= 0 && v <= ONE_MONTH_MINUTES)
                 .distinct()
                 .toArray();
-    }
-
-    @Scheduled(cron = "0 0 8 * * *", zone = "Asia/Tokyo")
-    public void sendTaskNotifications() {
-        LocalDate today = LocalDate.now(TOKYO);
-        for (NotificationDataStore.DueTask task : dataStore.dueTasks(today, OFFSET)) {
-            String key = today + ":" + task.id();
-            if (!dataStore.reserveDelivery(task.userId(), "TASK", key)) continue;
-            try {
-                push.push(task.userId(), "今日が期限のタスク\n" + task.title());
-            } catch (RuntimeException ignored) {
-                // Do not expose task content in logs.
-            }
-        }
     }
 
     @Scheduled(cron = "0 0 21 * * *", zone = "Asia/Tokyo")
