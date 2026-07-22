@@ -42,11 +42,59 @@ public class BenlyStore {
 
     public List<Item> listMemos(String userId) {
         ensureUser(userId);
-        return jdbc.query("""
-                select id, content from memos
+        return memoQuery("""
+                select id, content, favorite, tags from memos
                 where line_user_id = ? and archived = false
-                order by created_at desc limit 30
-                """, (rs, rowNum) -> new Item(rs.getLong("id"), rs.getString("content")), userId);
+                order by favorite desc, created_at desc limit 30
+                """, userId);
+    }
+
+    public List<Item> searchMemos(String userId, String keyword) {
+        ensureUser(userId);
+        String pattern = "%" + keyword.toLowerCase() + "%";
+        return memoQuery("""
+                select id, content, favorite, tags from memos
+                where line_user_id = ? and archived = false
+                  and (lower(content) like ? or lower(coalesce(tags, '')) like ?)
+                order by favorite desc, created_at desc limit 30
+                """, userId, pattern, pattern);
+    }
+
+    private List<Item> memoQuery(String sql, Object... args) {
+        return jdbc.query(sql, (rs, rowNum) -> {
+            StringBuilder text = new StringBuilder();
+            if (rs.getBoolean("favorite")) text.append("★ ");
+            text.append(rs.getString("content"));
+            String tags = rs.getString("tags");
+            if (tags != null && !tags.isBlank()) text.append("\n  #").append(tags.replace(",", " #"));
+            return new Item(rs.getLong("id"), text.toString());
+        }, args);
+    }
+
+    public boolean deleteMemo(String userId, long id) {
+        return jdbc.update("delete from memos where id = ? and line_user_id = ?", id, userId) == 1;
+    }
+
+    public boolean editMemo(String userId, long id, String content) {
+        return jdbc.update("""
+                update memos set content = ?, updated_at = current_timestamp
+                where id = ? and line_user_id = ?
+                """, content, id, userId) == 1;
+    }
+
+    public Boolean toggleMemoFavorite(String userId, long id) {
+        return jdbc.query("""
+                update memos set favorite = not favorite, updated_at = current_timestamp
+                where id = ? and line_user_id = ?
+                returning favorite
+                """, rs -> rs.next() ? rs.getBoolean(1) : null, id, userId);
+    }
+
+    public boolean setMemoTags(String userId, long id, String tags) {
+        return jdbc.update("""
+                update memos set tags = ?, updated_at = current_timestamp
+                where id = ? and line_user_id = ?
+                """, tags, id, userId) == 1;
     }
 
     public int clearMemos(String userId) {
