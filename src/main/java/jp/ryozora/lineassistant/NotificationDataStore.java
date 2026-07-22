@@ -17,7 +17,7 @@ public class NotificationDataStore {
 
     public List<UpcomingSchedule> upcomingSchedules(OffsetDateTime from, OffsetDateTime to) {
         return jdbc.query("""
-                select s.id, s.line_user_id, s.title, s.starts_at
+                select s.id, s.line_user_id, s.title, s.starts_at, s.reminder_minutes
                 from schedules s
                 join user_settings u on u.line_user_id = s.line_user_id
                 where u.schedule_notification = true
@@ -27,7 +27,8 @@ public class NotificationDataStore {
                 rs.getLong("id"),
                 rs.getString("line_user_id"),
                 rs.getString("title"),
-                rs.getTimestamp("starts_at").toInstant().atOffset(ZoneOffset.ofHours(9))
+                rs.getTimestamp("starts_at").toInstant().atOffset(ZoneOffset.ofHours(9)),
+                rs.getString("reminder_minutes")
         ), Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
     }
 
@@ -92,7 +93,8 @@ public class NotificationDataStore {
         jdbc.update("update user_settings set last_night_notice = ? where line_user_id = ?", date, userId);
     }
 
-    public record UpcomingSchedule(long id, String userId, String title, OffsetDateTime startsAt) {}
+    public record UpcomingSchedule(long id, String userId, String title,
+                                   OffsetDateTime startsAt, String reminderMinutes) {}
     public record DueTask(long id, String userId, String title, OffsetDateTime dueAt) {}
     public record NightSummary(int completedTasks, int tomorrowSchedules, int gainedExperience) {}
 }
