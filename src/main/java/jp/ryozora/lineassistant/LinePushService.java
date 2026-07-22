@@ -82,7 +82,7 @@ public class LinePushService {
 
     public void pushScheduleReminder(String userId, long scheduleId, String title,
                                      OffsetDateTime startsAt, int minutesBefore) {
-        String timing = minutesBefore == 0 ? "まもなく始まるよ" : "あと" + minutesBefore + "分だよ";
+        String timing = reminderTiming(minutesBefore);
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
         bubble.put("size", "mega");
@@ -94,7 +94,8 @@ public class LinePushService {
                 text(title, "xl", "bold", "#263746", "center"),
                 text(startsAt.format(DateTimeFormatter.ofPattern("M月d日(E) H:mm")),
                         "md", "regular", "#526D82", "center"),
-                text("忘れ物はない？", "sm", "regular", "#6B7F90", "center")
+                text(minutesBefore >= 1440 ? "早めに準備しておこう" : "忘れ物はない？",
+                        "sm", "regular", "#6B7F90", "center")
         )));
         bubble.put("footer", box("#EEF5FF", "12px", List.of(
                 buttonRow(button("あと5分", "スヌーズ 5 " + scheduleId, "#71A7DD"),
@@ -104,9 +105,18 @@ public class LinePushService {
         )));
         Map<String, Object> flex = new LinkedHashMap<>();
         flex.put("type", "flex");
-        flex.put("altText", "予定のお知らせ：" + title);
+        flex.put("altText", "予定のお知らせ：" + title + "（" + timing + "）");
         flex.put("contents", bubble);
         send(userId, flex);
+    }
+
+    private String reminderTiming(int minutesBefore) {
+        if (minutesBefore == 0) return "予定の時間になったよ";
+        if (minutesBefore == 30 * 24 * 60) return "1か月前のお知らせ";
+        if (minutesBefore % (7 * 24 * 60) == 0) return (minutesBefore / (7 * 24 * 60)) + "週間前のお知らせ";
+        if (minutesBefore % (24 * 60) == 0) return (minutesBefore / (24 * 60)) + "日前のお知らせ";
+        if (minutesBefore % 60 == 0) return (minutesBefore / 60) + "時間前のお知らせ";
+        return minutesBefore + "分前のお知らせ";
     }
 
     private void send(String userId, Map<String, Object> message) {
