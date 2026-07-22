@@ -10,6 +10,7 @@ public class HelpCommandService {
                 || text.equals("メモヘルプ") || text.equals("メモ使い方")
                 || text.equals("タスクヘルプ") || text.equals("タスク使い方")
                 || text.equals("買い物ヘルプ") || text.equals("買い物使い方")
+                || text.equals("家計簿ヘルプ") || text.equals("家計簿使い方")
                 || text.equals("天気ヘルプ") || text.equals("天気使い方")
                 || text.equals("通知ヘルプ") || text.equals("通知使い方")
                 || text.equals("その他ヘルプ") || text.equals("基本ヘルプ")
@@ -23,6 +24,7 @@ public class HelpCommandService {
             case "メモヘルプ", "メモ使い方" -> memoHelp();
             case "タスクヘルプ", "タスク使い方" -> taskHelp();
             case "買い物ヘルプ", "買い物使い方" -> shoppingHelp();
+            case "家計簿ヘルプ", "家計簿使い方" -> expenseHelp();
             case "天気ヘルプ", "天気使い方" -> weatherHelp();
             case "通知ヘルプ", "通知使い方" -> notificationHelp();
             case "その他ヘルプ", "基本ヘルプ" -> otherHelp();
@@ -120,6 +122,32 @@ public class HelpCommandService {
                 """.strip();
     }
 
+    private String expenseHelp() {
+        return """
+                【家計簿の使い方】
+
+                ■ 一言で記録
+                昼1200円
+                スタバ650円
+                昨日 スーパー3,480円
+                支出 980 電車
+
+                ■ 確認
+                家計簿
+                今日いくら
+                今月いくら
+                カテゴリ別
+                食費いくら
+                支出一覧
+
+                ■ 修正・削除
+                支出編集 1 1500 昼ごはん
+                支出削除 1
+
+                食費・交通費・日用品・娯楽・医療・住居・通信へ自動分類するよ。
+                """.strip();
+    }
+
     private String weatherHelp() {
         return """
                 【天気の聞き方】
@@ -169,8 +197,11 @@ public class HelpCommandService {
         return """
                 【その他の機能】
 
-                経験値
-                レベル
+                今日のミッション
+                統計
+                カレンダー
+                プロフィール
+                実績一覧
                 時刻
                 自分のデータ
                 プライバシー
@@ -188,6 +219,7 @@ public class HelpCommandService {
                 メモヘルプ
                 タスクヘルプ
                 買い物ヘルプ
+                家計簿ヘルプ
                 天気ヘルプ
                 通知ヘルプ
                 その他ヘルプ
