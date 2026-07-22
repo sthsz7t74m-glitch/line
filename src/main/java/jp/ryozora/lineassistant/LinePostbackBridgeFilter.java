@@ -17,12 +17,13 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
-import java.util.Map;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
@@ -126,6 +127,16 @@ public class LinePostbackBridgeFilter extends OncePerRequestFilter {
         }
 
         @Override
+        public String getCharacterEncoding() {
+            return StandardCharsets.UTF_8.name();
+        }
+
+        @Override
+        public String getContentType() {
+            return "application/json";
+        }
+
+        @Override
         public int getContentLength() {
             return body.length;
         }
@@ -133,6 +144,12 @@ public class LinePostbackBridgeFilter extends OncePerRequestFilter {
         @Override
         public long getContentLengthLong() {
             return body.length;
+        }
+
+        @Override
+        public BufferedReader getReader() {
+            return new BufferedReader(new InputStreamReader(
+                    new ByteArrayInputStream(body), StandardCharsets.UTF_8));
         }
 
         @Override
