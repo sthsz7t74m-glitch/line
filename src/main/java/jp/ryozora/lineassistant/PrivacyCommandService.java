@@ -10,17 +10,20 @@ public class PrivacyCommandService {
     private final ConversationalCommandService conversationalService;
     private final HabitService habitService;
     private final TaskService taskService;
+    private final RichMenuSetupService richMenuSetupService;
 
     public PrivacyCommandService(BenlyStore store,
                                  AiSecretaryService secretaryService,
                                  ConversationalCommandService conversationalService,
                                  HabitService habitService,
-                                 TaskService taskService) {
+                                 TaskService taskService,
+                                 RichMenuSetupService richMenuSetupService) {
         this.store = store;
         this.secretaryService = secretaryService;
         this.conversationalService = conversationalService;
         this.habitService = habitService;
         this.taskService = taskService;
+        this.richMenuSetupService = richMenuSetupService;
     }
 
     public String handle(String userId, String raw) {
@@ -28,6 +31,19 @@ public class PrivacyCommandService {
 
         if (text.length() > MAX_MESSAGE_LENGTH) {
             return "入力が長すぎるよ！1回のメッセージは1000文字以内にしてね。";
+        }
+
+        if (text.equals("リッチメニュー状態")) {
+            return "リッチメニュー状態：" + richMenuSetupService.status();
+        }
+        if (text.equals("リッチメニュー再設定")) {
+            try {
+                String id = richMenuSetupService.setupDefaultMenu();
+                return "リッチメニューを再設定したよ。\nID：" + id
+                        + "\n\nトークを閉じて開き直して確認してね。";
+            } catch (Exception e) {
+                return "リッチメニューの再設定に失敗したよ。\nRenderログで『Benly rich menu setup failed』を確認してね。";
+            }
         }
 
         // Deadline task phrases must be handled before schedule interpretation.
