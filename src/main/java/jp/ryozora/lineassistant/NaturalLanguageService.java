@@ -37,7 +37,6 @@ public class NaturalLanguageService {
         WORD_NORMALIZATIONS.put("こんしゅう", "今週");
         WORD_NORMALIZATIONS.put("らいげつ", "来月");
         WORD_NORMALIZATIONS.put("こんげつ", "今月");
-
         WORD_NORMALIZATIONS.put("げつようび", "月曜日");
         WORD_NORMALIZATIONS.put("かようび", "火曜日");
         WORD_NORMALIZATIONS.put("すいようび", "水曜日");
@@ -52,7 +51,6 @@ public class NaturalLanguageService {
         WORD_NORMALIZATIONS.put("きんよう", "金曜");
         WORD_NORMALIZATIONS.put("どよう", "土曜");
         WORD_NORMALIZATIONS.put("にちよう", "日曜");
-
         WORD_NORMALIZATIONS.put("ごぜん", "午前");
         WORD_NORMALIZATIONS.put("ごご", "午後");
         WORD_NORMALIZATIONS.put("しょうご", "正午");
@@ -65,12 +63,11 @@ public class NaturalLanguageService {
 
     public Interpretation interpret(String text) {
         if (text == null || text.isBlank()) return null;
-
         String normalized = normalizeForParsing(text);
+
         LocalDateTime relative = extractRelativeDateTime(normalized);
         LocalDate date = relative != null ? relative.toLocalDate() : extractDate(normalized);
         LocalTime time = relative != null ? relative.toLocalTime() : extractTime(normalized);
-
         if (date != null || time != null || containsAny(normalized, "朝", "昼", "夕方", "夜", "正午", "終日")) {
             LocalDate resolvedDate = date != null ? date : LocalDate.now(TOKYO);
             LocalTime resolvedTime = time != null ? time : defaultTime(normalized);
@@ -82,17 +79,14 @@ public class NaturalLanguageService {
                 LocalDateTime startsAt = LocalDateTime.of(resolvedDate, resolvedTime);
                 return new Interpretation(Type.SCHEDULE,
                         "予定 " + startsAt.format(SCHEDULE_FORMAT) + " " + title,
-                        "予定として登録するで！");
+                        "予定として登録するよ！");
             }
         }
 
-        if (containsAny(normalized, "買う", "買って", "切れた", "なくなった", "補充", "購入")) {
-            String item = normalized
-                    .replace("買って", "").replace("買う", "").replace("切れた", "")
-                    .replace("なくなった", "").replace("補充", "").replace("購入", "")
-                    .replace("を", "").strip();
+        if (isShoppingExpression(normalized)) {
+            String item = cleanShoppingItem(normalized);
             if (!item.isBlank()) {
-                return new Interpretation(Type.SHOPPING, "買い物 " + item, "買い物リストに入れるで！");
+                return new Interpretation(Type.SHOPPING, "買い物 " + item, "買い物リストに追加するよ！");
             }
         }
 
@@ -102,22 +96,45 @@ public class NaturalLanguageService {
                     .replace("忘れそう", "").replace("しなきゃ", "")
                     .replace("すること", "").strip();
             if (!task.isBlank()) {
-                return new Interpretation(Type.TASK, "タスク " + task, "タスクとして登録するで！");
+                return new Interpretation(Type.TASK, "タスク " + task, "タスクとして登録するよ！");
             }
         }
         return null;
     }
 
+    private boolean isShoppingExpression(String text) {
+        return containsAny(text,
+                "ほしい", "欲しい", "必要", "要る", "いる",
+                "買う", "買って", "買っといて", "買っておいて", "買わなきゃ", "買っておきたい",
+                "切れた", "切れそう", "なくなった", "なくなりそう", "残り少ない",
+                "補充", "補充したい", "購入");
+    }
+
+    private String cleanShoppingItem(String text) {
+        String value = text;
+        String[] phrases = {
+                "買っておいて", "買っておきたい", "買っといて", "買わなきゃ",
+                "なくなりそう", "なくなった", "切れそう", "切れた",
+                "残り少ない", "補充したい", "補充", "購入",
+                "欲しいな", "ほしいな", "欲しい", "ほしい", "必要", "要る", "いる",
+                "買って", "買う"
+        };
+        for (String phrase : phrases) value = value.replace(phrase, "");
+        return value
+                .replaceFirst("^(これ|それ|あれ)[をが]?", "")
+                .replaceFirst("[をがは]$", "")
+                .replaceAll("(?:が|を|は)?(?:ちょっと|そろそろ)$", "")
+                .replaceAll("[!！?？。]+$", "")
+                .replaceAll("\\s+", " ")
+                .strip();
+    }
+
     private String normalizeForParsing(String raw) {
         String value = Normalizer.normalize(raw, Normalizer.Form.NFKC)
                 .replace('\u3000', ' ')
-                .replace('：', ':')
-                .replace('／', '/')
                 .replaceAll("[\\t\\n\\r ]+", " ")
                 .strip();
-        for (Map.Entry<String, String> entry : WORD_NORMALIZATIONS.entrySet()) {
-            value = value.replace(entry.getKey(), entry.getValue());
-        }
+        for (Map.Entry<String, String> entry : WORD_NORMALIZATIONS.entrySet()) value = value.replace(entry.getKey(), entry.getValue());
         return value;
     }
 
@@ -138,12 +155,10 @@ public class NaturalLanguageService {
         if (text.contains("明後日")) return today.plusDays(2);
         if (text.contains("明日")) return today.plusDays(1);
         if (text.contains("今日")) return today;
-
         Matcher slash = SLASH_DATE.matcher(text);
         if (slash.find()) return resolveDate(today, slash.group(1), slash.group(2), slash.group(3));
         Matcher jp = JP_DATE.matcher(text);
         if (jp.find()) return resolveDate(today, jp.group(1), jp.group(2), jp.group(3));
-
         String[] names = {"月曜", "火曜", "水曜", "木曜", "金曜", "土曜", "日曜"};
         DayOfWeek[] days = DayOfWeek.values();
         for (int i = 0; i < names.length; i++) {
