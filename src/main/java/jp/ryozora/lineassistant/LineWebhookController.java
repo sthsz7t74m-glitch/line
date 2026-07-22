@@ -30,6 +30,8 @@ public class LineWebhookController {
     private final AdvancedScheduleService advancedScheduleService;
     private final HelpCommandService helpCommandService;
     private final SnoozeService snoozeService;
+    private final AiSecretaryService aiSecretaryService;
+    private final RpgService rpgService;
     private final HttpClient client = HttpClient.newHttpClient();
 
     public LineWebhookController(LineProperties props, ObjectMapper mapper,
@@ -40,7 +42,9 @@ public class LineWebhookController {
                                  WeatherCommandService weatherCommandService,
                                  AdvancedScheduleService advancedScheduleService,
                                  HelpCommandService helpCommandService,
-                                 SnoozeService snoozeService) {
+                                 SnoozeService snoozeService,
+                                 AiSecretaryService aiSecretaryService,
+                                 RpgService rpgService) {
         this.props = props;
         this.mapper = mapper;
         this.commandService = commandService;
@@ -51,19 +55,21 @@ public class LineWebhookController {
         this.advancedScheduleService = advancedScheduleService;
         this.helpCommandService = helpCommandService;
         this.snoozeService = snoozeService;
+        this.aiSecretaryService = aiSecretaryService;
+        this.rpgService = rpgService;
     }
 
     @GetMapping("/")
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.7.1",
+                "version", "0.8.0",
                 "status", "running",
                 "storage", "postgresql",
                 "naturalLanguage", "rule-based",
                 "notifications", "enabled",
                 "weather", "enabled",
-                "recurringSchedules", "enabled"
+                "rpg", "enabled"
         );
     }
 
@@ -108,6 +114,14 @@ public class LineWebhookController {
                 }
                 if (helpCommandService.supports(input)) {
                     replyText(replyToken, helpCommandService.handle(input));
+                    continue;
+                }
+                if (rpgService.supports(input)) {
+                    replyText(replyToken, rpgService.handle(userId, input));
+                    continue;
+                }
+                if (aiSecretaryService.supports(input)) {
+                    replyText(replyToken, aiSecretaryService.handle(userId, input));
                     continue;
                 }
                 if (snoozeService.supports(input)) {
@@ -216,16 +230,17 @@ public class LineWebhookController {
                 text("使いたい機能を選んでね", "sm", "regular", "#765E6C", "center")
         )));
         bubble.put("body", box("#FFF9FC", "12px", List.of(
-                buttonRow(button("今日の予定", "今日の予定", "#80B8F0"), button("予定一覧", "予定一覧", "#6CA6E5")),
+                buttonRow(button("今日のまとめ", "今日のダッシュボード", "#80B8F0"), button("予定一覧", "予定一覧", "#6CA6E5")),
                 buttonRow(button("予定を追加", "明日19時 ", "#8DCAF1"), button("繰り返し予定", "毎週月曜19時 ", "#9F9BE8")),
-                buttonRow(button("今日の天気", "今日の天気", "#F2B95F"), button("明日の天気", "明日の天気", "#E9A95E")),
+                buttonRow(button("今日の天気", "今日の天気", "#F2B95F"), button("忘れ物", "忘れ物チェック", "#E9A95E")),
                 buttonRow(button("メモ", "メモ一覧", "#EFA6C6"), button("タスク", "タスク一覧", "#78CDBB")),
                 buttonRow(button("買い物", "買い物一覧", "#F0B878"), button("通知設定", "通知設定", "#9BB8EA")),
-                buttonRow(button("使い方", "ヘルプ", "#A995D8"), button("個人データ", "プライバシー", "#AEBBCF"))
+                buttonRow(button("プロフィール", "プロフィール", "#A995D8"), button("実績", "実績一覧", "#8E9CB3")),
+                buttonRow(button("使い方", "ヘルプ", "#B99AC9"), button("個人データ", "プライバシー", "#AEBBCF"))
         )));
         bubble.put("footer", box("#F9EAF3", "10px", List.of(
-                text("例：あさって19時 歯医者", "xs", "regular", "#765E6C", "center"),
-                text("例：毎週月曜19時 ジム", "xs", "regular", "#765E6C", "center")
+                text("例：今日は何からやればいい？", "xs", "regular", "#765E6C", "center"),
+                text("例：プロフィール / 実績一覧", "xs", "regular", "#765E6C", "center")
         )));
         return bubble;
     }
@@ -242,6 +257,7 @@ public class LineWebhookController {
                 buttonRow(button("予定", "予定ヘルプ", "#7EAEE8"), button("天気", "天気ヘルプ", "#E7B45E")),
                 buttonRow(button("メモ", "メモヘルプ", "#ECAFC4"), button("タスク", "タスクヘルプ", "#82CDBF")),
                 buttonRow(button("買い物", "買い物ヘルプ", "#E9B86F"), button("通知", "通知ヘルプ", "#9AB9E6")),
+                buttonRow(button("プロフィール", "プロフィール", "#A995D8"), button("実績", "実績一覧", "#8E9CB3")),
                 buttonRow(button("その他", "その他ヘルプ", "#AAB8CF"), button("全コマンド", "コマンド一覧", "#BBA4DE")),
                 button("ホームへ戻る", "ホーム", "#8E9CB3")
         )));
@@ -321,13 +337,13 @@ public class LineWebhookController {
 
     private Map<String, Object> quickReplyMenu() {
         return Map.of("items", List.of(
-                quickReply("ヘルプ", "ヘルプ"),
                 quickReply("ホーム", "ホーム"),
-                quickReply("天気", "今日の天気"),
+                quickReply("今日", "今日のダッシュボード"),
                 quickReply("予定", "予定一覧"),
-                quickReply("メモ", "メモ一覧"),
                 quickReply("タスク", "タスク一覧"),
                 quickReply("買い物", "買い物一覧"),
+                quickReply("プロフィール", "プロフィール"),
+                quickReply("実績", "実績一覧"),
                 quickReply("通知", "通知設定")
         ));
     }
