@@ -63,7 +63,7 @@ public class LineWebhookController {
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.8.0",
+                "version", "0.9.0",
                 "status", "running",
                 "storage", "postgresql",
                 "naturalLanguage", "rule-based",
@@ -76,11 +76,8 @@ public class LineWebhookController {
     @PostMapping("/line/webhook")
     public ResponseEntity<Void> webhook(
             @RequestHeader(value = "x-line-signature", required = false) String signature,
-            @RequestBody String body
-    ) {
-        if (body.getBytes(StandardCharsets.UTF_8).length > MAX_WEBHOOK_BODY_BYTES) {
-            return ResponseEntity.status(413).build();
-        }
+            @RequestBody String body) {
+        if (body.getBytes(StandardCharsets.UTF_8).length > MAX_WEBHOOK_BODY_BYTES) return ResponseEntity.status(413).build();
         if (!validSignature(body, signature)) return ResponseEntity.status(401).build();
 
         try {
@@ -88,10 +85,8 @@ public class LineWebhookController {
             for (JsonNode event : root.path("events")) {
                 if (!"message".equals(event.path("type").asText())) continue;
                 if (!"text".equals(event.path("message").path("type").asText())) continue;
-
                 String userId = event.path("source").path("userId").asText();
                 if (!allowed(userId)) continue;
-
                 String replyToken = event.path("replyToken").asText();
                 String input = event.path("message").path("text").asText().strip();
                 if (input.length() > 1000) {
@@ -100,44 +95,20 @@ public class LineWebhookController {
                 }
 
                 String privacyResponse = privacyCommandService.handle(userId, input);
-                if (privacyResponse != null) {
-                    replyText(replyToken, privacyResponse);
-                    continue;
-                }
-                if (isHomeCommand(input)) {
-                    replyHome(replyToken);
-                    continue;
-                }
-                if (isHelpCommand(input)) {
-                    replyHelp(replyToken);
-                    continue;
-                }
-                if (helpCommandService.supports(input)) {
-                    replyText(replyToken, helpCommandService.handle(input));
-                    continue;
-                }
-                if (rpgService.supports(input)) {
-                    replyText(replyToken, rpgService.handle(userId, input));
-                    continue;
-                }
-                if (aiSecretaryService.supports(input)) {
-                    replyText(replyToken, aiSecretaryService.handle(userId, input));
-                    continue;
-                }
-                if (snoozeService.supports(input)) {
-                    replyText(replyToken, snoozeService.handle(userId, input));
-                    continue;
-                }
+                if (privacyResponse != null) { replyText(replyToken, privacyResponse); continue; }
+                if (isHomeCommand(input)) { replyHome(replyToken); continue; }
+                if (isHelpCommand(input)) { replyHelp(replyToken); continue; }
+                if (helpCommandService.supports(input)) { replyText(replyToken, helpCommandService.handle(input)); continue; }
+                if (rpgService.supports(input)) { replyText(replyToken, rpgService.handle(userId, input)); continue; }
+                if (aiSecretaryService.supports(input)) { replyText(replyToken, aiSecretaryService.handle(userId, input)); continue; }
+                if (snoozeService.supports(input)) { replyText(replyToken, snoozeService.handle(userId, input)); continue; }
                 if (notificationCommandService.isSettingsCommand(input)) {
                     replyNotificationSettings(replyToken, notificationCommandService.process(userId, input));
                     continue;
                 }
                 if (advancedScheduleService.supports(input)) {
                     String response = advancedScheduleService.handle(userId, input);
-                    if (response != null) {
-                        replyText(replyToken, response);
-                        continue;
-                    }
+                    if (response != null) { replyText(replyToken, response); continue; }
                 }
                 if (weatherCommandService.isWeatherCommand(input)) {
                     replyText(replyToken, weatherCommandService.handle(userId, input));
@@ -148,12 +119,9 @@ public class LineWebhookController {
                 if (response.startsWith("受け取ったよ：")) {
                     NaturalLanguageService.Interpretation interpretation = naturalLanguageService.interpret(input);
                     if (interpretation != null) {
-                        if (interpretation.type() == NaturalLanguageService.Type.SCHEDULE) {
-                            response = advancedScheduleService.handle(userId, interpretation.command());
-                        } else {
-                            response = interpretation.description() + "\n\n"
-                                    + commandService.handle(userId, interpretation.command());
-                        }
+                        response = interpretation.type() == NaturalLanguageService.Type.SCHEDULE
+                                ? advancedScheduleService.handle(userId, interpretation.command())
+                                : interpretation.description() + "\n\n" + commandService.handle(userId, interpretation.command());
                     }
                 }
                 replyText(replyToken, response);
@@ -174,8 +142,7 @@ public class LineWebhookController {
     }
 
     private boolean allowed(String userId) {
-        return props.ownerUserId() == null || props.ownerUserId().isBlank()
-                || props.ownerUserId().equals(userId);
+        return props.ownerUserId() == null || props.ownerUserId().isBlank() || props.ownerUserId().equals(userId);
     }
 
     private boolean validSignature(String body, String received) {
@@ -199,14 +166,8 @@ public class LineWebhookController {
         sendReply(replyToken, List.of(message));
     }
 
-    private void replyHome(String replyToken) {
-        sendFlex(replyToken, "ベンリーのホームメニュー", homeBubble());
-    }
-
-    private void replyHelp(String replyToken) {
-        sendFlex(replyToken, "ベンリーでできること", helpBubble());
-    }
-
+    private void replyHome(String replyToken) { sendFlex(replyToken, "ベンリー冒険者ホーム", homeBubble()); }
+    private void replyHelp(String replyToken) { sendFlex(replyToken, "ベンリーでできること", helpBubble()); }
     private void replyNotificationSettings(String replyToken, NotificationStore.Settings settings) {
         sendFlex(replyToken, "ベンリーの通知設定", notificationBubble(settings));
     }
@@ -224,23 +185,24 @@ public class LineWebhookController {
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
         bubble.put("size", "mega");
-        bubble.put("header", box("#FFDDF0", "18px", List.of(
-                text("ベンリー", "xl", "bold", "#503B49", "center"),
-                text("きょうも、ちょっと便利に。", "md", "bold", "#765E6C", "center"),
-                text("使いたい機能を選んでね", "sm", "regular", "#765E6C", "center")
+        bubble.put("header", box("#E8DEFF", "18px", List.of(
+                text("ベンリー冒険者ホーム", "xl", "bold", "#493D69", "center"),
+                text("毎日の用事をクリアして成長しよう", "sm", "regular", "#6D6287", "center"),
+                text("プロフィールでレベルと称号を確認できるよ", "xs", "regular", "#756C86", "center")
         )));
-        bubble.put("body", box("#FFF9FC", "12px", List.of(
-                buttonRow(button("今日のまとめ", "今日のダッシュボード", "#80B8F0"), button("予定一覧", "予定一覧", "#6CA6E5")),
-                buttonRow(button("予定を追加", "明日19時 ", "#8DCAF1"), button("繰り返し予定", "毎週月曜19時 ", "#9F9BE8")),
-                buttonRow(button("今日の天気", "今日の天気", "#F2B95F"), button("忘れ物", "忘れ物チェック", "#E9A95E")),
+        bubble.put("body", box("#FCFAFF", "12px", List.of(
+                buttonRow(button("今日のミッション", "今日のミッション", "#9A78D3"), button("プロフィール", "プロフィール", "#7E71BE")),
+                buttonRow(button("今日のまとめ", "今日のダッシュボード", "#80B8F0"), button("週間カレンダー", "カレンダー", "#6CA6E5")),
+                buttonRow(button("統計", "統計", "#78B8A4"), button("今月の記録", "今月の統計", "#6FAF9D")),
+                buttonRow(button("今週の成績", "今週ランキング", "#E2A85D"), button("実績", "実績一覧", "#A995D8")),
+                buttonRow(button("予定一覧", "予定一覧", "#6CA6E5"), button("予定を追加", "明日19時 ", "#8DCAF1")),
                 buttonRow(button("メモ", "メモ一覧", "#EFA6C6"), button("タスク", "タスク一覧", "#78CDBB")),
-                buttonRow(button("買い物", "買い物一覧", "#F0B878"), button("通知設定", "通知設定", "#9BB8EA")),
-                buttonRow(button("プロフィール", "プロフィール", "#A995D8"), button("実績", "実績一覧", "#8E9CB3")),
-                buttonRow(button("使い方", "ヘルプ", "#B99AC9"), button("個人データ", "プライバシー", "#AEBBCF"))
+                buttonRow(button("買い物", "買い物一覧", "#F0B878"), button("今日の天気", "今日の天気", "#F2B95F")),
+                buttonRow(button("通知設定", "通知設定", "#9BB8EA"), button("使い方", "ヘルプ", "#AEBBCF"))
         )));
-        bubble.put("footer", box("#F9EAF3", "10px", List.of(
-                text("例：今日は何からやればいい？", "xs", "regular", "#765E6C", "center"),
-                text("例：プロフィール / 実績一覧", "xs", "regular", "#765E6C", "center")
+        bubble.put("footer", box("#F2EEFA", "10px", List.of(
+                text("ミッションを全部達成すると EXP +50", "xs", "bold", "#6D6287", "center"),
+                text("予定・タスク・買い物・メモが成長につながるよ", "xs", "regular", "#756C86", "center")
         )));
         return bubble;
     }
@@ -251,19 +213,16 @@ public class LineWebhookController {
         bubble.put("size", "mega");
         bubble.put("header", box("#EDE3FF", "18px", List.of(
                 text("ベンリーの使い方", "xl", "bold", "#4D426B", "center"),
-                text("現在使える機能から選んでね", "sm", "regular", "#6D6287", "center")
+                text("使いたい機能を選んでね", "sm", "regular", "#6D6287", "center")
         )));
         bubble.put("body", box("#FCFAFF", "12px", List.of(
                 buttonRow(button("予定", "予定ヘルプ", "#7EAEE8"), button("天気", "天気ヘルプ", "#E7B45E")),
                 buttonRow(button("メモ", "メモヘルプ", "#ECAFC4"), button("タスク", "タスクヘルプ", "#82CDBF")),
                 buttonRow(button("買い物", "買い物ヘルプ", "#E9B86F"), button("通知", "通知ヘルプ", "#9AB9E6")),
+                buttonRow(button("ミッション", "今日のミッション", "#9A78D3"), button("統計", "統計", "#78B8A4")),
                 buttonRow(button("プロフィール", "プロフィール", "#A995D8"), button("実績", "実績一覧", "#8E9CB3")),
-                buttonRow(button("その他", "その他ヘルプ", "#AAB8CF"), button("全コマンド", "コマンド一覧", "#BBA4DE")),
+                buttonRow(button("カレンダー", "カレンダー", "#7EAEE8"), button("全コマンド", "コマンド一覧", "#BBA4DE")),
                 button("ホームへ戻る", "ホーム", "#8E9CB3")
-        )));
-        bubble.put("footer", box("#F2EEFA", "10px", List.of(
-                text("自然な文章でも使えるよ", "xs", "bold", "#6D6287", "center"),
-                text("牛乳ほしい / 明日傘いる？ / 毎日8時 薬", "xs", "regular", "#756C86", "center")
         )));
         return bubble;
     }
@@ -299,8 +258,7 @@ public class LineWebhookController {
     }
 
     private Map<String, Object> toggleButton(String label, String type, boolean enabled, String enabledColor) {
-        return button(label + "  " + (enabled ? "オン" : "オフ"), "通知切替 " + type,
-                enabled ? enabledColor : "#8B949C");
+        return button(label + "  " + (enabled ? "オン" : "オフ"), "通知切替 " + type, enabled ? enabledColor : "#8B949C");
     }
 
     private Map<String, Object> buttonRow(Map<String, Object> left, Map<String, Object> right) {
@@ -338,20 +296,18 @@ public class LineWebhookController {
     private Map<String, Object> quickReplyMenu() {
         return Map.of("items", List.of(
                 quickReply("ホーム", "ホーム"),
+                quickReply("ミッション", "今日のミッション"),
                 quickReply("今日", "今日のダッシュボード"),
+                quickReply("カレンダー", "カレンダー"),
+                quickReply("統計", "統計"),
                 quickReply("予定", "予定一覧"),
-                quickReply("タスク", "タスク一覧"),
-                quickReply("買い物", "買い物一覧"),
                 quickReply("プロフィール", "プロフィール"),
-                quickReply("実績", "実績一覧"),
                 quickReply("通知", "通知設定")
         ));
     }
 
     private Map<String, Object> quickReply(String label, String text) {
-        return Map.of("type", "action", "action", Map.of(
-                "type", "message", "label", label, "text", text
-        ));
+        return Map.of("type", "action", "action", Map.of("type", "message", "label", label, "text", text));
     }
 
     private void sendReply(String replyToken, List<Map<String, Object>> messages) {
@@ -360,12 +316,9 @@ public class LineWebhookController {
             HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.line.me/v2/bot/message/reply"))
                     .header("Authorization", "Bearer " + props.channelAccessToken())
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
+                    .POST(HttpRequest.BodyPublishers.ofString(json)).build();
             HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
-            if (response.statusCode() / 100 != 2) {
-                throw new IllegalStateException("LINE API error: HTTP " + response.statusCode());
-            }
+            if (response.statusCode() / 100 != 2) throw new IllegalStateException("LINE API error: HTTP " + response.statusCode());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Reply interrupted");
