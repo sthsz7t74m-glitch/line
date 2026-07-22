@@ -11,6 +11,7 @@ public class HelpCommandService {
                 || text.equals("タスクヘルプ") || text.equals("タスク使い方")
                 || text.equals("買い物ヘルプ") || text.equals("買い物使い方")
                 || text.equals("家計簿ヘルプ") || text.equals("家計簿使い方")
+                || text.equals("習慣ヘルプ") || text.equals("習慣使い方")
                 || text.equals("天気ヘルプ") || text.equals("天気使い方")
                 || text.equals("通知ヘルプ") || text.equals("通知使い方")
                 || text.equals("その他ヘルプ") || text.equals("基本ヘルプ")
@@ -25,6 +26,7 @@ public class HelpCommandService {
             case "タスクヘルプ", "タスク使い方" -> taskHelp();
             case "買い物ヘルプ", "買い物使い方" -> shoppingHelp();
             case "家計簿ヘルプ", "家計簿使い方" -> expenseHelp();
+            case "習慣ヘルプ", "習慣使い方" -> habitHelp();
             case "天気ヘルプ", "天気使い方" -> weatherHelp();
             case "通知ヘルプ", "通知使い方" -> notificationHelp();
             case "その他ヘルプ", "基本ヘルプ" -> otherHelp();
@@ -148,6 +150,39 @@ public class HelpCommandService {
                 """.strip();
     }
 
+    private String habitHelp() {
+        return """
+                【習慣トラッカーの使い方】
+
+                ■ 登録
+                習慣 筋トレ
+                習慣 薬 毎日 21:00
+                習慣 読書 平日 22:00
+                習慣 ゴミ出し 火金 7:00
+
+                曜日は「毎日」「平日」「土日」または
+                「月水金」のように指定できるよ。
+                時刻を付けると、その時間に通知するよ。
+
+                ■ 今日の確認・達成
+                今日の習慣
+                習慣達成 1
+                習慣取消 1
+
+                ■ 管理
+                習慣一覧
+                習慣編集 1 読書 月水金 22:00
+                習慣休止 1
+                習慣再開 1
+                習慣削除 1
+
+                ■ 記録
+                習慣統計
+
+                達成すると経験値+5。30日達成率と連続日数も確認できるよ。
+                """.strip();
+    }
+
     private String weatherHelp() {
         return """
                 【天気の聞き方】
@@ -182,6 +217,9 @@ public class HelpCommandService {
                 ・1か月前
                 ・1週間前
                 の通知も追加されるよ。
+
+                習慣は登録時に時刻を付けると、その時刻に通知するよ。
+                通知カードの「できた」から直接達成できるよ。
 
                 予定通知カードから
                 「あと5分」「あと10分」「あと30分」「明日にする」
@@ -220,6 +258,7 @@ public class HelpCommandService {
                 タスクヘルプ
                 買い物ヘルプ
                 家計簿ヘルプ
+                習慣ヘルプ
                 天気ヘルプ
                 通知ヘルプ
                 その他ヘルプ
