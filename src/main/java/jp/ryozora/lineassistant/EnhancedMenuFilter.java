@@ -78,8 +78,7 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
                 if (!MENU_COMMANDS.contains(input)) continue;
                 String userId = event.path("source").path("userId").asText();
                 if (!allowed(userId)) continue;
-                String replyToken = event.path("replyToken").asText();
-                sendMenu(replyToken, canonical(input));
+                sendMenu(event.path("replyToken").asText(), canonical(input));
                 handled = true;
             }
             if (handled) {
@@ -131,57 +130,57 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
 
     private Map<String, Object> homeBubble() {
         return bubble(
-                header("ベンリー", "使いたい機能を選んでね", "#493D69", "#EDE3FF"),
-                box("#FCFAFF", "12px", List.of(
+                header("ベンリー", "使いたい機能を選んでね", "#4F5870", "#EEF1F6"),
+                box("#FCFDFE", "12px", List.of(
                         sectionLabel("⭐ よく使う"),
-                        row(button("今日まとめ", "今日のダッシュボード", "#6CA6E5"), button("タスク一覧", "タスク一覧", "#55B9A7")),
-                        button("買い物一覧", "買い物一覧", "#E7A94E"),
+                        row(button("今日まとめ", "今日のダッシュボード", "#627A9C"), button("タスク一覧", "タスク一覧", "#7187A5")),
+                        button("買い物一覧", "買い物一覧", "#8193AB"),
                         separator(),
                         sectionLabel("カテゴリ"),
-                        row(button("今日・予定", "予定メニュー", "#2E6FC4"), button("メモ・タスク", "記録メニュー", "#2E9B6B")),
-                        row(button("お金・買い物", "お金メニュー", "#D88916"), button("習慣・成長", "成長メニュー", "#7957C7")),
-                        row(button("通知", "通知設定", "#567EC7"), button("使い方", "ヘルプ", "#78869A"))
+                        row(button("今日・予定", "予定メニュー", "#4F7FC7"), button("メモ・タスク", "記録メニュー", "#4F9F8A")),
+                        row(button("お金・買い物", "お金メニュー", "#C68A2B"), button("習慣・成長", "成長メニュー", "#7656B8")),
+                        row(button("通知", "通知設定", "#7187A5"), button("使い方", "ヘルプ", "#8793A5"))
                 ))
         );
     }
 
     private Map<String, Object> scheduleBubble() {
-        return categoryBubble("🏠 ホーム ＞ 今日・予定", "予定と今日の確認", "#2E6FC4", "#DDEBFF", List.of(
-                row(button("今日まとめ", "今日のダッシュボード", "#6CA6E5"), button("予定一覧", "予定一覧", "#668FD8")),
-                row(button("カレンダー", "カレンダー", "#4E85D1"), button("予定追加", "明日19時 ", "#76B4E3")),
-                row(button("今日の天気", "今日の天気", "#E7A94E"), button("通知設定", "通知設定", "#7898CF"))
+        return categoryBubble("🏠 ホーム ＞ 今日・予定", "予定と今日の確認", "#4F7FC7", "#E7EFFA", List.of(
+                row(button("今日まとめ", "今日のダッシュボード", "#4F7FC7"), button("予定一覧", "予定一覧", "#5E8BCB")),
+                row(button("カレンダー", "カレンダー", "#6F9BD5"), button("予定追加", "予定追加", "#7EA8DB")),
+                row(button("今日の天気", "今日の天気", "#8BAFDC"), button("通知設定", "通知設定", "#98B6D9"))
         ));
     }
 
     private Map<String, Object> recordBubble() {
-        return categoryBubble("🏠 ホーム ＞ メモ・タスク", "メモとやること", "#2E9B6B", "#DDF5EE", List.of(
-                row(button("タスク一覧", "タスク一覧", "#55B9A7"), button("タスク追加", "タスク ", "#71C9B7")),
-                row(button("メモ一覧", "メモ一覧", "#D989AD"), button("メモ追加", "メモ ", "#E4A5BF")),
-                row(button("自分のデータ", "自分のデータ", "#78869A"), button("統計", "統計", "#5AA78F"))
+        return categoryBubble("🏠 ホーム ＞ メモ・タスク", "メモとやること", "#4F9F8A", "#E7F3EF", List.of(
+                row(button("タスク一覧", "タスク一覧", "#4F9F8A"), button("タスク追加", "タスク追加", "#5EAA96")),
+                row(button("メモ一覧", "メモ一覧", "#6BB5A2"), button("メモ追加", "メモ追加", "#78BEAC")),
+                row(button("自分のデータ", "自分のデータ", "#86B8AC"), button("統計", "統計", "#91C1B5"))
         ));
     }
 
     private Map<String, Object> moneyBubble() {
-        return categoryBubble("🏠 ホーム ＞ お金・買い物", "支出と買い物", "#D88916", "#FFF0D9", List.of(
-                row(button("家計簿", "家計簿", "#D88916"), button("買い物一覧", "買い物一覧", "#E7A94E")),
-                row(button("今日の支出", "今日いくら", "#C99532"), button("今月の支出", "今月いくら", "#B98527")),
-                row(button("カテゴリ別", "カテゴリ別", "#D2A34E"), button("支出一覧", "支出一覧", "#B97D19"))
+        return categoryBubble("🏠 ホーム ＞ お金・買い物", "支出と買い物", "#C68A2B", "#FAF0DF", List.of(
+                row(button("家計簿", "家計簿", "#C68A2B"), button("買い物一覧", "買い物一覧", "#D09538")),
+                row(button("今日の支出", "今日いくら", "#D6A04A"), button("今月の支出", "今月いくら", "#DBAA59")),
+                row(button("カテゴリ別", "カテゴリ別", "#E0B367"), button("支出一覧", "支出一覧", "#E3BA76"))
         ));
     }
 
     private Map<String, Object> growthBubble() {
-        return categoryBubble("🏠 ホーム ＞ 習慣・成長", "習慣と成長", "#7957C7", "#EEE5FF", List.of(
-                row(button("今日の習慣", "今日の習慣", "#55A77E"), button("習慣追加", "習慣 ", "#70B593")),
-                row(button("ミッション", "今日のミッション", "#7957C7"), button("プロフィール", "プロフィール", "#6D64B8")),
-                row(button("実績", "実績一覧", "#9A7BD0"), button("今週成績", "今週ランキング", "#D4A34B"))
+        return categoryBubble("🏠 ホーム ＞ 習慣・成長", "習慣と成長", "#7656B8", "#EFEAF8", List.of(
+                row(button("今日の習慣", "今日の習慣", "#7656B8"), button("習慣追加", "習慣追加", "#8264BF")),
+                row(button("ミッション", "今日のミッション", "#8D72C6"), button("プロフィール", "プロフィール", "#9780CD")),
+                row(button("実績", "実績一覧", "#A18DD3"), button("今週成績", "今週ランキング", "#AA98D8"))
         ));
     }
 
     private Map<String, Object> categoryBubble(String title, String subtitle, String accent, String background,
                                                List<Map<String, Object>> rows) {
         java.util.ArrayList<Map<String, Object>> contents = new java.util.ArrayList<>(rows);
-        contents.add(button("🏠 ホーム", "ホーム", "#78869A"));
-        return bubble(header(title, subtitle, accent, background), box("#FCFCFE", "12px", contents));
+        contents.add(button("🏠 ホーム", "ホーム", "#8793A5"));
+        return bubble(header(title, subtitle, accent, background), box("#FCFDFE", "12px", contents));
     }
 
     private Map<String, Object> bubble(Map<String, Object> header, Map<String, Object> body) {
@@ -189,9 +188,9 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
     }
 
     private Map<String, Object> header(String title, String subtitle, String accent, String background) {
-        return box(background, "14px", List.of(
+        return box(background, "12px", List.of(
                 text(title, "lg", "bold", accent, "center"),
-                text(subtitle, "xs", "regular", "#637083", "center")
+                text(subtitle, "xs", "regular", "#6F7B8D", "center")
         ));
     }
 
@@ -201,13 +200,13 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
         map.put("layout", "vertical");
         map.put("backgroundColor", background);
         map.put("paddingAll", padding);
-        map.put("spacing", "md");
+        map.put("spacing", "sm");
         map.put("contents", contents);
         return map;
     }
 
     private Map<String, Object> row(Map<String, Object> left, Map<String, Object> right) {
-        return Map.of("type", "box", "layout", "horizontal", "spacing", "md", "contents", List.of(left, right));
+        return Map.of("type", "box", "layout", "horizontal", "spacing", "sm", "contents", List.of(left, right));
     }
 
     private Map<String, Object> button(String label, String message, String color) {
