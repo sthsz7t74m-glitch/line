@@ -10,7 +10,11 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -25,8 +29,14 @@ import java.util.Map;
 
 @Service
 public class RichMenuSetupService {
+    static {
+        // BufferedImage/ImageIO work without an X server. Setting this explicitly keeps
+        // image generation predictable on headless hosts such as Render.
+        System.setProperty("java.awt.headless", "true");
+    }
+
     private static final Logger log = LoggerFactory.getLogger(RichMenuSetupService.class);
-    private static final String MENU_NAME = "Benly Main v2";
+    private static final String MENU_NAME = "Benly Main v3";
     private static final String API = "https://api.line.me/v2/bot";
     private static final String DATA_API = "https://api-data.line.me/v2/bot";
     private static final int WIDTH = 2500;
@@ -34,9 +44,16 @@ public class RichMenuSetupService {
 
     private final LineProperties props;
     private final ObjectMapper mapper;
-    private final HttpClient client = HttpClient.newHttpClient();
+    private final HttpClient client = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
     private final boolean autoSetup;
+
     private volatile String lastStatus = "not-started";
+    private volatile String lastStage = "idle";
+    private volatile String lastError = "";
+    private volatile String lastMenuId = "";
+    private volatile int lastImageBytes;
 
     public RichMenuSetupService(LineProperties props, ObjectMapper mapper,
                                 @Value("${line.bot.rich-menu.auto-setup:true}") boolean autoSetup) {
@@ -49,52 +66,179 @@ public class RichMenuSetupService {
     public void setupOnStartup() {
         if (!autoSetup) {
             lastStatus = "disabled";
+            lastStage = "startup";
             log.info("Benly rich menu setup is disabled");
             return;
         }
         if (tokenMissing()) {
             lastStatus = "token-missing";
+            lastStage = "startup";
             log.warn("Benly rich menu setup skipped: LINE channel access token is missing");
             return;
         }
         try {
             String richMenuId = setupDefaultMenu();
-            lastStatus = "ready:" + richMenuId;
             log.info("Benly rich menu is ready: {}", richMenuId);
         } catch (Exception e) {
-            lastStatus = "failed:" + e.getClass().getSimpleName();
-            log.warn("Benly rich menu setup failed: {}", e.getMessage());
+            rememberFailure(e);
+            log.warn("Benly rich menu setup failed at {}: {}", lastStage, lastError);
         }
     }
 
     public String status() {
-        return lastStatus;
+        StringBuilder out = new StringBuilder()
+                .append("状態：").append(lastStatus)
+                .append("\n工程：").append(lastStage);
+        if (!lastMenuId.isBlank()) out.append("\nID：").append(lastMenuId);
+        if (lastImageBytes > 0) out.append("\n画像：").append(lastImageBytes).append(" bytes");
+        if (!lastError.isBlank()) out.append("\n詳細：").append(lastError);
+        return out.toString();
+    }
+
+    public synchronized String diagnosticStatus(String userId) {
+        StringBuilder out = new StringBuilder(status());
+        if (tokenMissing()) return out.toString();
+
+        try {
+            String defaultId = getDefaultMenuId();
+            out.append("\nLINE既定：").append(defaultId == null ? "なし" : defaultId);
+        } catch (Exception e) {
+            out.append("\nLINE既定確認：").append(safeMessage(e));
+        }
+
+        if (userId != null && !userId.isBlank()) {
+            try {
+                String linkedId = getLinkedMenuId(userId);
+                out.append("\nあなたへの紐付け：").append(linkedId == null ? "なし" : linkedId);
+            } catch (Exception e) {
+                out.append("\n個別紐付け確認：").append(safeMessage(e));
+            }
+        }
+        return out.toString();
     }
 
     public synchronized String setupDefaultMenu() throws Exception {
-        if (tokenMissing()) throw new IllegalStateException("LINE channel access token is missing");
+        return setup(false, props.ownerUserId());
+    }
 
-        String existing = findExistingMenu();
-        if (existing != null) {
-            setDefault(existing);
-            lastStatus = "ready:" + existing;
-            return existing;
+    /**
+     * Deletes stale Benly rich menus, creates a fresh one, sets it as the
+     * default, and links it directly to the requesting LINE user.
+     */
+    public synchronized String recreateForUser(String userId) throws Exception {
+        return setup(true, userId);
+    }
+
+    private String setup(boolean forceRecreate, String userId) throws Exception {
+        if (tokenMissing()) {
+            lastStatus = "token-missing";
+            lastStage = "authentication";
+            throw new IllegalStateException("LINE channel access token is missing");
         }
 
-        String richMenuId = createMenu();
+        lastStatus = "running";
+        lastError = "";
+        lastImageBytes = 0;
+
         try {
-            byte[] image = generateMenuImage();
-            log.info("Generated rich menu PNG: {} bytes", image.length);
-            uploadImage(richMenuId, image);
-            setDefault(richMenuId);
-            deleteLegacyMenus(richMenuId);
-            lastStatus = "ready:" + richMenuId;
-            return richMenuId;
+            if (forceRecreate) {
+                lastStage = "cleanup";
+                unlinkUserQuietly(userId);
+                deleteAllBenlyMenus();
+            }
+
+            lastStage = "menu-list";
+            String existing = findExistingMenu();
+            if (existing != null) {
+                lastStage = "image-check";
+                if (hasImage(existing)) {
+                    activate(existing, userId);
+                    rememberReady(existing);
+                    return existing;
+                }
+                deleteMenu(existing);
+            }
+
+            lastStage = "menu-validate";
+            Map<String, Object> menuObject = menuObject();
+            validateMenu(menuObject);
+
+            lastStage = "menu-create";
+            String richMenuId = createMenu(menuObject);
+            lastMenuId = richMenuId;
+            try {
+                lastStage = "image-generate";
+                byte[] image = generateMenuImage();
+                lastImageBytes = image.length;
+                log.info("Generated rich menu PNG: {} bytes", image.length);
+
+                lastStage = "image-upload";
+                uploadImage(richMenuId, image);
+
+                lastStage = "image-verify";
+                if (!hasImage(richMenuId)) {
+                    throw new IllegalStateException("LINE accepted no readable image for the rich menu");
+                }
+
+                activate(richMenuId, userId);
+
+                lastStage = "legacy-cleanup";
+                deleteLegacyMenus(richMenuId);
+
+                rememberReady(richMenuId);
+                return richMenuId;
+            } catch (Exception e) {
+                deleteMenu(richMenuId);
+                throw e;
+            }
         } catch (Exception e) {
-            deleteMenu(richMenuId);
-            lastStatus = "failed:" + e.getClass().getSimpleName();
+            rememberFailure(e);
             throw e;
         }
+    }
+
+    private void activate(String richMenuId, String userId) throws Exception {
+        lastStage = "default-link";
+        setDefault(richMenuId);
+
+        if (userId != null && !userId.isBlank()) {
+            lastStage = "user-link";
+            linkUser(userId, richMenuId);
+        }
+
+        lastStage = "link-verify";
+        String defaultId = getDefaultMenuId();
+        if (!richMenuId.equals(defaultId)) {
+            throw new IllegalStateException("default rich menu verification failed");
+        }
+        if (userId != null && !userId.isBlank()) {
+            String linkedId = getLinkedMenuId(userId);
+            if (!richMenuId.equals(linkedId)) {
+                throw new IllegalStateException("per-user rich menu verification failed");
+            }
+        }
+    }
+
+    private void rememberReady(String richMenuId) {
+        lastStatus = "ready";
+        lastStage = "complete";
+        lastError = "";
+        lastMenuId = richMenuId;
+    }
+
+    private void rememberFailure(Exception e) {
+        lastStatus = "failed";
+        lastError = safeMessage(e);
+    }
+
+    private String safeMessage(Throwable error) {
+        String value = error == null ? "unknown error" : error.getMessage();
+        if (value == null || value.isBlank()) {
+            value = error == null ? "unknown error" : error.getClass().getSimpleName();
+        }
+        value = value.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").strip();
+        if (value.length() > 500) value = value.substring(0, 500);
+        return value;
     }
 
     private String findExistingMenu() throws Exception {
@@ -108,22 +252,34 @@ public class RichMenuSetupService {
     }
 
     private JsonNode listMenus() throws Exception {
-        HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(API + "/richmenu/list"))
+        HttpResponse<String> response = sendText(HttpRequest.newBuilder(URI.create(API + "/richmenu/list"))
                 .header("Authorization", bearer())
                 .GET().build());
         requireSuccess(response, "list rich menus");
         return mapper.readTree(response.body()).path("richmenus");
     }
 
-    private String createMenu() throws Exception {
+    private Map<String, Object> menuObject() {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("size", Map.of("width", WIDTH, "height", HEIGHT));
         body.put("selected", true);
         body.put("name", MENU_NAME);
         body.put("chatBarText", "ベンリーを開く");
         body.put("areas", areas());
+        return body;
+    }
 
-        HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(API + "/richmenu"))
+    private void validateMenu(Map<String, Object> body) throws Exception {
+        HttpResponse<String> response = sendText(HttpRequest.newBuilder(URI.create(API + "/richmenu/validate"))
+                .header("Authorization", bearer())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body), StandardCharsets.UTF_8))
+                .build());
+        requireSuccess(response, "validate rich menu");
+    }
+
+    private String createMenu(Map<String, Object> body) throws Exception {
+        HttpResponse<String> response = sendText(HttpRequest.newBuilder(URI.create(API + "/richmenu"))
                 .header("Authorization", bearer())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body), StandardCharsets.UTF_8))
@@ -178,8 +334,8 @@ public class RichMenuSetupService {
 
             int cellWidth = WIDTH / 3;
             int cellHeight = HEIGHT / 2;
-            Font titleFont = new Font("SansSerif", Font.BOLD, 91);
-            Font subFont = new Font("SansSerif", Font.BOLD, 58);
+            Font titleFont = new Font(Font.SANS_SERIF, Font.BOLD, 91);
+            Font subFont = new Font(Font.SANS_SERIF, Font.BOLD, 58);
 
             for (int index = 0; index < 6; index++) {
                 int row = index / 3;
@@ -212,14 +368,21 @@ public class RichMenuSetupService {
             throw new IllegalStateException("PNG writer is unavailable");
         }
         byte[] bytes = output.toByteArray();
-        if (bytes.length < 8 || bytes[0] != (byte) 0x89 || bytes[1] != 0x50
-                || bytes[2] != 0x4E || bytes[3] != 0x47) {
+        if (!isPng(bytes)) {
             throw new IllegalStateException("Generated rich menu image is not a PNG");
         }
         if (bytes.length > 1024 * 1024) {
-            throw new IllegalStateException("Generated rich menu image exceeds 1 MB");
+            throw new IllegalStateException("Generated rich menu image exceeds 1 MB: " + bytes.length + " bytes");
         }
         return bytes;
+    }
+
+    private boolean isPng(byte[] bytes) {
+        return bytes != null && bytes.length >= 8
+                && bytes[0] == (byte) 0x89 && bytes[1] == 0x50
+                && bytes[2] == 0x4E && bytes[3] == 0x47
+                && bytes[4] == 0x0D && bytes[5] == 0x0A
+                && bytes[6] == 0x1A && bytes[7] == 0x0A;
     }
 
     private void drawCentered(Graphics2D g, String text, int x, int baseline, int width) {
@@ -229,7 +392,7 @@ public class RichMenuSetupService {
     }
 
     private void uploadImage(String richMenuId, byte[] image) throws Exception {
-        HttpResponse<String> response = send(HttpRequest.newBuilder(
+        HttpResponse<String> response = sendText(HttpRequest.newBuilder(
                         URI.create(DATA_API + "/richmenu/" + richMenuId + "/content"))
                 .header("Authorization", bearer())
                 .header("Content-Type", "image/png")
@@ -238,13 +401,76 @@ public class RichMenuSetupService {
         requireSuccess(response, "upload rich menu image");
     }
 
+    private boolean hasImage(String richMenuId) throws Exception {
+        HttpResponse<byte[]> response = sendBytes(HttpRequest.newBuilder(
+                        URI.create(DATA_API + "/richmenu/" + richMenuId + "/content"))
+                .header("Authorization", bearer())
+                .GET().build());
+        if (response.statusCode() == 404) return false;
+        if (response.statusCode() / 100 != 2) {
+            throw new IllegalStateException("get rich menu image failed: HTTP " + response.statusCode());
+        }
+        byte[] body = response.body();
+        return body != null && body.length > 8;
+    }
+
     private void setDefault(String richMenuId) throws Exception {
-        HttpResponse<String> response = send(HttpRequest.newBuilder(
+        HttpResponse<String> response = sendText(HttpRequest.newBuilder(
                         URI.create(API + "/user/all/richmenu/" + richMenuId))
                 .header("Authorization", bearer())
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build());
         requireSuccess(response, "set default rich menu");
+    }
+
+    private String getDefaultMenuId() throws Exception {
+        HttpResponse<String> response = sendText(HttpRequest.newBuilder(
+                        URI.create(API + "/user/all/richmenu"))
+                .header("Authorization", bearer())
+                .GET().build());
+        if (response.statusCode() == 404) return null;
+        requireSuccess(response, "get default rich menu");
+        String id = mapper.readTree(response.body()).path("richMenuId").asText();
+        return id.isBlank() ? null : id;
+    }
+
+    private void linkUser(String userId, String richMenuId) throws Exception {
+        HttpResponse<String> response = sendText(HttpRequest.newBuilder(
+                        URI.create(API + "/user/" + userId + "/richmenu/" + richMenuId))
+                .header("Authorization", bearer())
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build());
+        requireSuccess(response, "link rich menu to user");
+    }
+
+    private String getLinkedMenuId(String userId) throws Exception {
+        HttpResponse<String> response = sendText(HttpRequest.newBuilder(
+                        URI.create(API + "/user/" + userId + "/richmenu"))
+                .header("Authorization", bearer())
+                .GET().build());
+        if (response.statusCode() == 404) return null;
+        requireSuccess(response, "get user rich menu");
+        String id = mapper.readTree(response.body()).path("richMenuId").asText();
+        return id.isBlank() ? null : id;
+    }
+
+    private void unlinkUserQuietly(String userId) {
+        if (userId == null || userId.isBlank()) return;
+        try {
+            sendText(HttpRequest.newBuilder(URI.create(API + "/user/" + userId + "/richmenu"))
+                    .header("Authorization", bearer())
+                    .DELETE().build());
+        } catch (Exception ignored) {
+            // Best-effort cleanup before a forced recreation.
+        }
+    }
+
+    private void deleteAllBenlyMenus() throws Exception {
+        for (JsonNode menu : listMenus()) {
+            String id = menu.path("richMenuId").asText();
+            String name = menu.path("name").asText();
+            if (name.startsWith("Benly Main")) deleteMenu(id);
+        }
     }
 
     private void deleteLegacyMenus(String keepId) {
@@ -257,13 +483,14 @@ public class RichMenuSetupService {
                 }
             }
         } catch (Exception e) {
-            log.info("Legacy rich menus could not be cleaned up: {}", e.getMessage());
+            log.info("Legacy rich menus could not be cleaned up: {}", safeMessage(e));
         }
     }
 
     private void deleteMenu(String richMenuId) {
+        if (richMenuId == null || richMenuId.isBlank()) return;
         try {
-            send(HttpRequest.newBuilder(URI.create(API + "/richmenu/" + richMenuId))
+            sendText(HttpRequest.newBuilder(URI.create(API + "/richmenu/" + richMenuId))
                     .header("Authorization", bearer())
                     .DELETE().build());
         } catch (Exception ignored) {
@@ -271,9 +498,18 @@ public class RichMenuSetupService {
         }
     }
 
-    private HttpResponse<String> send(HttpRequest request) throws Exception {
+    private HttpResponse<String> sendText(HttpRequest request) throws Exception {
         try {
             return client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("LINE rich menu request interrupted", e);
+        }
+    }
+
+    private HttpResponse<byte[]> sendBytes(HttpRequest request) throws Exception {
+        try {
+            return client.send(request, HttpResponse.BodyHandlers.ofByteArray());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("LINE rich menu request interrupted", e);
@@ -283,8 +519,10 @@ public class RichMenuSetupService {
     private void requireSuccess(HttpResponse<String> response, String operation) {
         if (response.statusCode() / 100 != 2) {
             String body = response.body() == null ? "" : response.body();
-            if (body.length() > 300) body = body.substring(0, 300);
-            throw new IllegalStateException(operation + " failed: HTTP " + response.statusCode() + " " + body);
+            body = body.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").strip();
+            if (body.length() > 400) body = body.substring(0, 400);
+            throw new IllegalStateException(operation + " failed: HTTP " + response.statusCode()
+                    + (body.isBlank() ? "" : " " + body));
         }
     }
 
