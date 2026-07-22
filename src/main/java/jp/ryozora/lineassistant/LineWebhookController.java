@@ -51,7 +51,7 @@ public class LineWebhookController {
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.5.0",
+                "version", "0.5.1",
                 "status", "running",
                 "storage", "postgresql",
                 "naturalLanguage", "rule-based",
@@ -97,6 +97,11 @@ public class LineWebhookController {
                     continue;
                 }
 
+                if (isHelpCommand(input)) {
+                    replyHelp(replyToken);
+                    continue;
+                }
+
                 if (notificationCommandService.isSettingsCommand(input)) {
                     replyNotificationSettings(replyToken, notificationCommandService.process(userId, input));
                     continue;
@@ -127,6 +132,11 @@ public class LineWebhookController {
         return input.equals("ホーム") || input.equals("ベンリー") || input.equals("トップ");
     }
 
+    private boolean isHelpCommand(String input) {
+        return input.equals("ヘルプ") || input.equals("使い方") || input.equals("コマンド")
+                || input.equals("メニュー") || input.equalsIgnoreCase("help");
+    }
+
     private boolean allowed(String userId) {
         return props.ownerUserId() == null || props.ownerUserId().isBlank()
                 || props.ownerUserId().equals(userId);
@@ -155,6 +165,10 @@ public class LineWebhookController {
 
     private void replyHome(String replyToken) {
         sendFlex(replyToken, "ベンリーのホームメニュー", homeBubble());
+    }
+
+    private void replyHelp(String replyToken) {
+        sendFlex(replyToken, "ベンリーでできること", helpBubble());
     }
 
     private void replyNotificationSettings(String replyToken, NotificationStore.Settings settings) {
@@ -194,6 +208,28 @@ public class LineWebhookController {
         return bubble;
     }
 
+    private Map<String, Object> helpBubble() {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#E8E1FF", "20px", List.of(
+                text("❓ ベンリーでできること", "xl", "bold", "#4D426B", "center"),
+                text("知りたい機能をタップしてね", "sm", "regular", "#6D6287", "center")
+        )));
+        bubble.put("body", box("#FCFAFF", "16px", List.of(
+                buttonRow(button("📅 予定", "予定ヘルプ", "#7EAEE8"), button("🌤 天気", "天気ヘルプ", "#E7B45E")),
+                buttonRow(button("📝 メモ", "メモヘルプ", "#ECAFC4"), button("✅ タスク", "タスクヘルプ", "#82CDBF")),
+                buttonRow(button("🛒 買い物", "買い物ヘルプ", "#E9B86F"), button("🔔 通知", "通知ヘルプ", "#9AB9E6")),
+                buttonRow(button("🔐 プライバシー", "プライバシー", "#AAB8CF"), button("⭐ その他", "その他ヘルプ", "#BBA4DE"))
+        )));
+        bubble.put("footer", box("#F2EEFA", "12px", List.of(
+                text("自然な文章でも使えるよ", "xs", "bold", "#6D6287", "center"),
+                text("例：あさって19時 歯医者 / 明日傘いる？ / 牛乳切れた", "xs", "regular", "#756C86", "center"),
+                button("🏠 ホームへ戻る", "ホーム", "#7F91B5")
+        )));
+        return bubble;
+    }
+
     private Map<String, Object> notificationBubble(NotificationStore.Settings settings) {
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
@@ -209,7 +245,7 @@ public class LineWebhookController {
                 toggleButton("📅 予定通知", "予定", settings.schedule(), "#668FD8"),
                 toggleButton("⏰ タスク通知", "タスク", settings.task(), "#4AAE9E"),
                 toggleButton("🌙 夜通知", "夜", settings.night(), "#7765B5"),
-                button("❓ 通知の使い方", "予定ヘルプ", "#7F91B5")
+                button("❓ 通知の使い方", "通知ヘルプ", "#7F91B5")
         )));
         return bubble;
     }
