@@ -5,12 +5,16 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @Repository
 public class BenlyStore {
+    private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
     private final JdbcTemplate jdbc;
 
     public BenlyStore(JdbcTemplate jdbc) {
@@ -114,12 +118,27 @@ public class BenlyStore {
     public List<Item> listTasks(String userId) {
         ensureUser(userId);
         return jdbc.query("""
-                select id, title from tasks
+                select id, title, priority, due_at from tasks
                 where line_user_id = ? and completed = false
                 order by case priority when 'HIGH' then 1 when 'MEDIUM' then 2 else 3 end,
                          due_at nulls last, created_at
                 limit 30
-                """, (rs, rowNum) -> new Item(rs.getLong("id"), rs.getString("title")), userId);
+                """, (rs, rowNum) -> {
+            String priority = rs.getString("priority");
+            StringBuilder text = new StringBuilder();
+            if ("HIGH".equals(priority)) text.append("[高] ");
+            else if ("LOW".equals(priority)) text.append("[低] ");
+            else text.append("[中] ");
+            text.append(rs.getString("title"));
+            Timestamp due = rs.getTimestamp("due_at");
+            if (due != null) {
+                LocalDateTime local = due.toInstant().atZone(TOKYO).toLocalDateTime();
+                text.append("（期限 ").append(local.format(DateTimeFormatter.ofPattern("M/d H:mm")));
+                if (local.isBefore(LocalDateTime.now(TOKYO))) text.append("・期限切れ");
+                text.append("）");
+            }
+            return new Item(rs.getLong("id"), text.toString());
+        }, userId);
     }
 
     @Transactional
