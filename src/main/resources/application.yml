@@ -30,3 +30,5 @@ line:
     channel-secret: ${LINE_CHANNEL_SECRET:}
     channel-access-token: ${LINE_CHANNEL_ACCESS_TOKEN:}
     owner-user-id: ${LINE_OWNER_USER_ID:}
+    rich-menu:
+      auto-setup: ${LINE_RICH_MENU_AUTO_SETUP:true}
