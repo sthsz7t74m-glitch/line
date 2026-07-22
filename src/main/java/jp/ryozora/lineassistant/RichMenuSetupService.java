@@ -10,11 +10,15 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
+import java.awt.Polygon;
 import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -24,31 +28,33 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
 public class RichMenuSetupService {
     static {
-        // BufferedImage/ImageIO work without an X server. Setting this explicitly keeps
-        // image generation predictable on headless hosts such as Render.
         System.setProperty("java.awt.headless", "true");
     }
 
     private static final Logger log = LoggerFactory.getLogger(RichMenuSetupService.class);
-    private static final String MENU_NAME = "Benly Main v4";
+    private static final String MENU_NAME = "Benly Main v5 日本語";
     private static final String API = "https://api.line.me/v2/bot";
     private static final String DATA_API = "https://api-data.line.me/v2/bot";
     private static final int WIDTH = 2500;
     private static final int HEIGHT = 1686;
     private static final int HTTP_TIMEOUT_MILLIS = 20_000;
+    private static final String JAPANESE_SAMPLE = "今日予定メモタスクお金買い物習慣成長通知設定ホーム";
 
     private final LineProperties props;
     private final ObjectMapper mapper;
     private final HttpClient client = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofMillis(HTTP_TIMEOUT_MILLIS))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
     private final boolean autoSetup;
@@ -57,6 +63,7 @@ public class RichMenuSetupService {
     private volatile String lastStage = "idle";
     private volatile String lastError = "";
     private volatile String lastMenuId = "";
+    private volatile String lastFontName = "";
     private volatile int lastImageBytes;
 
     public RichMenuSetupService(LineProperties props, ObjectMapper mapper,
@@ -82,7 +89,7 @@ public class RichMenuSetupService {
         }
         try {
             String richMenuId = setupDefaultMenu();
-            log.info("Benly rich menu is ready: {}", richMenuId);
+            log.info("Benly Japanese rich menu is ready: {}", richMenuId);
         } catch (Exception e) {
             rememberFailure(e);
             log.warn("Benly rich menu setup failed at {}: {}", lastStage, lastError);
@@ -94,6 +101,7 @@ public class RichMenuSetupService {
                 .append("状態：").append(lastStatus)
                 .append("\n工程：").append(lastStage);
         if (!lastMenuId.isBlank()) out.append("\nID：").append(lastMenuId);
+        if (!lastFontName.isBlank()) out.append("\n日本語フォント：").append(lastFontName);
         if (lastImageBytes > 0) out.append("\n画像：").append(lastImageBytes).append(" bytes");
         if (!lastError.isBlank()) out.append("\n詳細：").append(lastError);
         return out.toString();
@@ -125,10 +133,6 @@ public class RichMenuSetupService {
         return setup(false, props.ownerUserId());
     }
 
-    /**
-     * Deletes stale Benly rich menus, creates a fresh one, sets it as the
-     * default, and links it directly to the requesting LINE user.
-     */
     public synchronized String recreateForUser(String userId) throws Exception {
         return setup(true, userId);
     }
@@ -143,6 +147,7 @@ public class RichMenuSetupService {
         lastStatus = "running";
         lastError = "";
         lastImageBytes = 0;
+        lastFontName = "";
 
         try {
             if (forceRecreate) {
@@ -174,7 +179,7 @@ public class RichMenuSetupService {
                 lastStage = "image-generate";
                 byte[] image = generateMenuImage();
                 lastImageBytes = image.length;
-                log.info("Generated rich menu PNG: {} bytes", image.length);
+                log.info("Generated Japanese rich menu PNG: {} bytes with {}", image.length, lastFontName);
 
                 lastStage = "image-upload";
                 uploadImage(richMenuId, image);
@@ -240,7 +245,7 @@ public class RichMenuSetupService {
         if (value == null || value.isBlank()) {
             value = error == null ? "unknown error" : error.getClass().getSimpleName();
         }
-        value = value.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").strip();
+        value = value.replaceAll("[\r\n\t]+", " ").replaceAll("\s+", " ").strip();
         if (value.length() > 500) value = value.substring(0, 500);
         return value;
     }
@@ -318,14 +323,16 @@ public class RichMenuSetupService {
         try {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.setColor(new Color(245, 249, 255));
+            g.fillRect(0, 0, WIDTH, HEIGHT);
 
-            String[][] labels = {
-                    {"TODAY", "SCHEDULE"},
-                    {"MEMO", "TASK"},
-                    {"MONEY", "SHOPPING"},
-                    {"HABIT", "GROWTH"},
-                    {"NOTIFICATIONS", "SETTINGS"},
-                    {"BENLY", "HOME"}
+            String[] titles = {
+                    "今日・予定", "メモ・タスク", "お金・買い物",
+                    "習慣・成長", "通知設定", "ホーム"
+            };
+            String[] subtitles = {
+                    "予定・天気", "メモ・やること", "家計簿・買うもの",
+                    "習慣・ミッション", "お知らせの切替", "メインメニュー"
             };
             Color[] backgrounds = {
                     new Color(220, 235, 255), new Color(221, 245, 236), new Color(255, 240, 217),
@@ -336,11 +343,13 @@ public class RichMenuSetupService {
                     new Color(121, 87, 199), new Color(86, 126, 199), new Color(79, 96, 119)
             };
 
+            String fontFamily = chooseJapaneseFont();
+            lastFontName = fontFamily;
+            Font titleFont = new Font(fontFamily, Font.BOLD, 86);
+            Font subtitleFont = new Font(fontFamily, Font.BOLD, 43);
+
             int cellWidth = WIDTH / 3;
             int cellHeight = HEIGHT / 2;
-            Font titleFont = new Font(Font.SANS_SERIF, Font.BOLD, 91);
-            Font subFont = new Font(Font.SANS_SERIF, Font.BOLD, 58);
-
             for (int index = 0; index < 6; index++) {
                 int row = index / 3;
                 int col = index % 3;
@@ -348,21 +357,29 @@ public class RichMenuSetupService {
                 int y = row * cellHeight;
                 int width = col == 2 ? WIDTH - x : cellWidth;
 
+                g.setColor(new Color(205, 214, 227));
+                g.fillRoundRect(x + 38, y + 46, width - 76, cellHeight - 76, 60, 60);
                 g.setColor(backgrounds[index]);
-                g.fillRect(x, y, width, cellHeight);
+                g.fillRoundRect(x + 28, y + 28, width - 56, cellHeight - 76, 60, 60);
                 g.setColor(accents[index]);
-                g.fillRect(x, y, width, 45);
+                g.fillRoundRect(x + 28, y + 28, width - 56, 42, 60, 60);
+                g.fillRect(x + 28, y + 49, width - 56, 21);
 
-                g.setFont(titleFont);
-                drawCentered(g, labels[index][0], x, y + 300, width);
-                g.setFont(subFont);
-                drawCentered(g, labels[index][1], x, y + 445, width);
+                int centerX = x + width / 2;
+                int iconY = y + 228;
+                drawIcon(g, index, centerX, iconY, accents[index]);
+
+                g.setColor(new Color(36, 50, 70));
+                drawCenteredFit(g, titles[index], titleFont, x + 50, y + 470, width - 100, 52);
+                g.setColor(new Color(83, 101, 124));
+                drawCenteredFit(g, subtitles[index], subtitleFont, x + 65, y + 575, width - 130, 30);
+
+                g.setColor(Color.WHITE);
+                g.fillRoundRect(centerX - 70, y + cellHeight - 135, 140, 58, 30, 30);
+                g.setColor(accents[index]);
+                Font tapFont = new Font(fontFamily, Font.BOLD, 31);
+                drawCenteredFit(g, "タップ", tapFont, centerX - 70, y + cellHeight - 94, 140, 22);
             }
-
-            g.setColor(Color.WHITE);
-            g.fillRect(WIDTH / 3 - 4, 0, 8, HEIGHT);
-            g.fillRect((WIDTH / 3) * 2 - 4, 0, 8, HEIGHT);
-            g.fillRect(0, HEIGHT / 2 - 4, WIDTH, 8);
         } finally {
             g.dispose();
         }
@@ -381,18 +398,105 @@ public class RichMenuSetupService {
         return bytes;
     }
 
+    private String chooseJapaneseFont() {
+        String[] candidates = {
+                "Noto Sans CJK JP", "Noto Sans JP", "Noto Sans CJK",
+                "IPAexGothic", "IPAGothic", Font.SANS_SERIF
+        };
+        for (String candidate : candidates) {
+            Font font = new Font(candidate, Font.BOLD, 72);
+            if (font.canDisplayUpTo(JAPANESE_SAMPLE) == -1) return font.getFamily(Locale.JAPANESE);
+        }
+        for (String family : GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames(Locale.JAPANESE)) {
+            Font font = new Font(family, Font.BOLD, 72);
+            if (font.canDisplayUpTo(JAPANESE_SAMPLE) == -1) return family;
+        }
+        throw new IllegalStateException("Japanese font is unavailable; install fonts-noto-cjk");
+    }
+
+    private void drawCenteredFit(Graphics2D g, String value, Font preferred,
+                                 int x, int baseline, int maxWidth, int minimumSize) {
+        int size = preferred.getSize();
+        Font selected = preferred;
+        while (size > minimumSize) {
+            FontMetrics metrics = g.getFontMetrics(selected);
+            if (metrics.stringWidth(value) <= maxWidth) break;
+            size -= 2;
+            selected = preferred.deriveFont((float) size);
+        }
+        g.setFont(selected);
+        FontMetrics metrics = g.getFontMetrics();
+        int textWidth = metrics.stringWidth(value);
+        g.drawString(value, x + Math.max(0, (maxWidth - textWidth) / 2), baseline);
+    }
+
+    private void drawIcon(Graphics2D g, int index, int centerX, int centerY, Color color) {
+        Stroke previousStroke = g.getStroke();
+        Color previousColor = g.getColor();
+        g.setColor(color);
+        g.setStroke(new BasicStroke(18, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        int s = 105;
+
+        switch (index) {
+            case 0 -> {
+                g.drawRoundRect(centerX - s, centerY - 82, s * 2, 168, 28, 28);
+                g.drawLine(centerX - s, centerY - 30, centerX + s, centerY - 30);
+                g.drawLine(centerX - 55, centerY - 108, centerX - 55, centerY - 62);
+                g.drawLine(centerX + 55, centerY - 108, centerX + 55, centerY - 62);
+                for (int dx : new int[]{-55, 0, 55}) {
+                    for (int dy : new int[]{18, 62}) {
+                        g.fillOval(centerX + dx - 10, centerY + dy - 10, 20, 20);
+                    }
+                }
+            }
+            case 1 -> {
+                g.drawRoundRect(centerX - 100, centerY - 100, 200, 200, 32, 32);
+                g.drawLine(centerX - 55, centerY + 5, centerX - 12, centerY + 48);
+                g.drawLine(centerX - 12, centerY + 48, centerX + 65, centerY - 52);
+            }
+            case 2 -> {
+                g.drawOval(centerX - 104, centerY - 104, 208, 208);
+                Font yenFont = new Font(lastFontName, Font.BOLD, 104);
+                g.setFont(yenFont);
+                FontMetrics metrics = g.getFontMetrics();
+                String mark = "¥";
+                g.drawString(mark, centerX - metrics.stringWidth(mark) / 2,
+                        centerY + metrics.getAscent() / 3);
+            }
+            case 3 -> {
+                g.drawLine(centerX, centerY + 95, centerX, centerY - 10);
+                g.drawOval(centerX - 105, centerY - 92, 102, 88);
+                g.drawOval(centerX + 3, centerY - 112, 102, 88);
+                g.drawLine(centerX, centerY - 5, centerX - 48, centerY - 48);
+                g.drawLine(centerX, centerY - 28, centerX + 52, centerY - 70);
+            }
+            case 4 -> {
+                g.drawArc(centerX - 100, centerY - 110, 200, 210, 205, 130);
+                g.drawLine(centerX - 90, centerY + 42, centerX + 90, centerY + 42);
+                g.fillOval(centerX - 17, centerY + 64, 34, 34);
+            }
+            case 5 -> {
+                Polygon roof = new Polygon(
+                        new int[]{centerX - 115, centerX, centerX + 115},
+                        new int[]{centerY - 12, centerY - 115, centerY - 12}, 3);
+                g.drawPolygon(roof);
+                g.drawRect(centerX - 82, centerY - 12, 164, 118);
+                g.drawRect(centerX - 24, centerY + 38, 48, 68);
+            }
+            default -> {
+            }
+        }
+
+        g.setStroke(previousStroke);
+        g.setColor(previousColor);
+    }
+
     private boolean isPng(byte[] bytes) {
         return bytes != null && bytes.length >= 8
                 && bytes[0] == (byte) 0x89 && bytes[1] == 0x50
                 && bytes[2] == 0x4E && bytes[3] == 0x47
                 && bytes[4] == 0x0D && bytes[5] == 0x0A
                 && bytes[6] == 0x1A && bytes[7] == 0x0A;
-    }
-
-    private void drawCentered(Graphics2D g, String text, int x, int baseline, int width) {
-        FontMetrics metrics = g.getFontMetrics();
-        int textWidth = metrics.stringWidth(text);
-        g.drawString(text, x + Math.max(0, (width - textWidth) / 2), baseline);
     }
 
     private void uploadImage(String richMenuId, byte[] image) throws Exception {
@@ -468,6 +572,7 @@ public class RichMenuSetupService {
         connection.setFixedLengthStreamingMode(0);
 
         try {
+            connection.getOutputStream().close();
             int statusCode = connection.getResponseCode();
             String body = readResponseBody(connection, statusCode);
             requireSuccess(statusCode, body, operation);
@@ -553,7 +658,7 @@ public class RichMenuSetupService {
     private void requireSuccess(int statusCode, String responseBody, String operation) {
         if (statusCode / 100 != 2) {
             String body = responseBody == null ? "" : responseBody;
-            body = body.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").strip();
+            body = body.replaceAll("[\r\n\t]+", " ").replaceAll("\s+", " ").strip();
             if (body.length() > 400) body = body.substring(0, 400);
             throw new IllegalStateException(operation + " failed: HTTP " + statusCode
                     + (body.isBlank() ? "" : " " + body));
