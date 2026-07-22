@@ -85,12 +85,16 @@ public class DailyProgressService {
     public String allStats(String userId) {
         LocalDate first = firstUseDate(userId);
         int exp = store.experience(userId);
+        YearMonth month = YearMonth.now(TOKYO);
+        long monthExpenses = expenseTotal(userId, month.atDay(1), month.plusMonths(1).atDay(1));
         return """
                 ベンリー統計
                 ━━━━━━━━━━
                 メモ　%d件
                 タスク完了　%d件
                 買い物完了　%d件
+                家計簿　%d件
+                今月の支出　%s
                 予定　%d件
                 累計経験値　%d
                 連続利用　%d日
@@ -101,6 +105,8 @@ public class DailyProgressService {
                 countSimple("select count(*) from memos where line_user_id=? and archived=false", userId),
                 countSimple("select count(*) from tasks where line_user_id=? and completed=true", userId),
                 countSimple("select count(*) from shopping_items where line_user_id=? and purchased=true", userId),
+                countSimple("select count(*) from expenses where line_user_id=?", userId),
+                yen(monthExpenses),
                 countSimple("select count(*) from schedules where line_user_id=?", userId),
                 exp, streak(userId), first.format(DateTimeFormatter.ofPattern("yyyy/M/d")),
                 Duration.between(first.atStartOfDay(), LocalDate.now(TOKYO).plusDays(1).atStartOfDay()).toDays()).strip();
@@ -110,6 +116,7 @@ public class DailyProgressService {
         YearMonth month = YearMonth.now(TOKYO);
         Instant start = month.atDay(1).atStartOfDay(TOKYO).toInstant();
         Instant end = month.plusMonths(1).atDay(1).atStartOfDay(TOKYO).toInstant();
+        long expenses = expenseTotal(userId, month.atDay(1), month.plusMonths(1).atDay(1));
         return """
                 %d年%d月の統計
                 ━━━━━━━━━━
@@ -117,12 +124,14 @@ public class DailyProgressService {
                 完了タスク　%d件
                 買い物完了　%d件
                 メモ追加　%d件
+                支出合計　%s
                 獲得経験値　+%d
                 """.formatted(month.getYear(), month.getMonthValue(),
                 count("select count(*) from schedules where line_user_id=? and starts_at>=? and starts_at<?", userId, start, end),
                 count("select count(*) from tasks where line_user_id=? and completed_at>=? and completed_at<?", userId, start, end),
                 count("select count(*) from shopping_items where line_user_id=? and purchased_at>=? and purchased_at<?", userId, start, end),
                 count("select count(*) from memos where line_user_id=? and created_at>=? and created_at<?", userId, start, end),
+                yen(expenses),
                 sum("select coalesce(sum(points),0) from experience_logs where line_user_id=? and created_at>=? and created_at<?", userId, start, end)).strip();
     }
 
@@ -175,7 +184,9 @@ public class DailyProgressService {
         return out.toString().stripTrailing();
     }
 
-    private String mark(boolean done) { return done ? "■" : "□"; }
+    private String mark(boolean done) {
+        return done ? "■" : "□";
+    }
 
     private int count(String sql, String userId, Instant start, Instant end) {
         Integer value = jdbc.queryForObject(sql, Integer.class, userId, Timestamp.from(start), Timestamp.from(end));
@@ -197,6 +208,18 @@ public class DailyProgressService {
         return value == null ? 0 : value;
     }
 
+    private long expenseTotal(String userId, LocalDate start, LocalDate end) {
+        Long value = jdbc.queryForObject("""
+                select coalesce(sum(amount),0) from expenses
+                where line_user_id=? and spent_on>=? and spent_on<?
+                """, Long.class, userId, start, end);
+        return value == null ? 0 : value;
+    }
+
+    private String yen(long amount) {
+        return String.format(Locale.JAPAN, "%,d円", amount);
+    }
+
     private LocalDate firstUseDate(String userId) {
         LocalDate date = jdbc.query("select created_at from benly_users where line_user_id=?", rs ->
                 rs.next() ? rs.getTimestamp(1).toInstant().atZone(TOKYO).toLocalDate() : null, userId);
@@ -209,13 +232,17 @@ public class DailyProgressService {
                     select created_at::date activity_date from memos where line_user_id=?
                     union select completed_at::date from tasks where line_user_id=? and completed_at is not null
                     union select purchased_at::date from shopping_items where line_user_id=? and purchased_at is not null
+                    union select created_at::date from expenses where line_user_id=?
                     union select starts_at::date from schedules where line_user_id=?
                 ) x order by activity_date desc limit 365
-                """, (rs, i) -> rs.getDate(1).toLocalDate(), userId, userId, userId, userId);
+                """, (rs, i) -> rs.getDate(1).toLocalDate(), userId, userId, userId, userId, userId);
         LocalDate cursor = LocalDate.now(TOKYO);
         int streak = 0;
         if (!dates.contains(cursor)) cursor = cursor.minusDays(1);
-        while (dates.contains(cursor)) { streak++; cursor = cursor.minusDays(1); }
+        while (dates.contains(cursor)) {
+            streak++;
+            cursor = cursor.minusDays(1);
+        }
         return streak;
     }
 
