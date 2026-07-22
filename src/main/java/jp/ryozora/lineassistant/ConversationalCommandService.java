@@ -16,7 +16,8 @@ public class ConversationalCommandService {
     private static final List<String> ADD_PHRASES = List.of(
             "追加してほしい", "登録してほしい", "記録してほしい", "入れてほしい",
             "追加したい", "登録したい", "記録したい", "入れたい", "作りたい", "つくりたい",
-            "追加して", "登録して", "記録して", "入れて", "作って", "つくって", "つけたい", "メモしたい"
+            "残したい", "取りたい", "追加して", "登録して", "記録して", "入れて",
+            "作って", "つくって", "つけたい", "メモしたい"
     );
     private static final List<String> VIEW_PHRASES = List.of(
             "見せてほしい", "教えてほしい", "確認したい", "見たい", "見せて", "教えて",
@@ -62,9 +63,7 @@ public class ConversationalCommandService {
         this.rpgService = rpgService;
     }
 
-    /**
-     * Returns null when the message should continue through the ordinary command routes.
-     */
+    /** Returns null when the ordinary command routes should continue processing the message. */
     public String handle(String userId, String raw) {
         String text = normalize(raw);
         if (text.isBlank()) return null;
@@ -81,18 +80,14 @@ public class ConversationalCommandService {
         }
 
         Intent intent = detectIntent(text);
-        if (intent != null) {
-            return handleIntent(userId, text, intent);
-        }
+        if (intent != null) return handleIntent(userId, text, intent);
 
         if (isCanonicalCommand(text)) {
             if (pending != null) clearPending(userId);
             return null;
         }
 
-        if (pending != null) {
-            return consumePending(userId, pending, text);
-        }
+        if (pending != null) return consumePending(userId, pending, text);
         return null;
     }
 
@@ -166,9 +161,7 @@ public class ConversationalCommandService {
     }
 
     private String addSchedule(String userId, String value) {
-        if (scheduleService.supports(value)) {
-            return scheduleService.handle(userId, value);
-        }
+        if (scheduleService.supports(value)) return scheduleService.handle(userId, value);
         NaturalLanguageService.Interpretation interpretation = naturalLanguageService.interpret(value);
         if (interpretation == null || interpretation.type() != NaturalLanguageService.Type.SCHEDULE) return null;
         return scheduleService.handle(userId, interpretation.command());
@@ -208,7 +201,7 @@ public class ConversationalCommandService {
         Domain domain = detectDomain(text);
         if (domain == null) return null;
 
-        if (containsAny(text, ADD_PHRASES)) return new Intent(domain, Action.ADD);
+        if (containsAny(text, ADD_PHRASES) && supportsAdd(domain)) return new Intent(domain, Action.ADD);
         if (containsAny(text, DELETE_PHRASES)) return new Intent(domain, Action.DELETE);
         if (containsAny(text, EDIT_PHRASES)) return new Intent(domain, Action.EDIT);
         if (containsAny(text, COMPLETE_PHRASES)) return new Intent(domain, Action.COMPLETE);
@@ -216,12 +209,17 @@ public class ConversationalCommandService {
         return null;
     }
 
+    private boolean supportsAdd(Domain domain) {
+        return domain == Domain.TASK || domain == Domain.SCHEDULE || domain == Domain.MEMO
+                || domain == Domain.SHOPPING || domain == Domain.EXPENSE || domain == Domain.HABIT;
+    }
+
     private Domain detectDomain(String text) {
         if (containsAny(text, List.of("タスク", "やること", "todo", "to-do"))) return Domain.TASK;
         if (containsAny(text, List.of("予定", "スケジュール"))) return Domain.SCHEDULE;
         if (text.contains("メモ")) return Domain.MEMO;
         if (containsAny(text, List.of("買い物", "買うもの", "買い物リスト"))) return Domain.SHOPPING;
-        if (containsAny(text, List.of("家計簿", "支出", "出費"))) return Domain.EXPENSE;
+        if (containsAny(text, List.of("家計簿", "支出", "出費", "お金"))) return Domain.EXPENSE;
         if (containsAny(text, List.of("習慣", "ルーティン"))) return Domain.HABIT;
         if (text.contains("天気")) return Domain.WEATHER;
         if (containsAny(text, List.of("統計", "利用状況", "成績"))) return Domain.STATS;
@@ -235,7 +233,7 @@ public class ConversationalCommandService {
             case SCHEDULE -> text.equals("予定ある？") || text.equals("予定ある?") || text.equals("予定どうなってる");
             case MEMO -> text.equals("メモある？") || text.equals("メモある?");
             case SHOPPING -> text.equals("買うものある？") || text.equals("買うものある?");
-            case EXPENSE -> text.equals("家計簿") || text.equals("支出どうなってる");
+            case EXPENSE -> text.equals("家計簿") || text.equals("支出どうなってる") || text.equals("お金どうなってる");
             case HABIT -> text.equals("習慣") || text.equals("習慣どうなってる");
             case WEATHER -> true;
             case STATS, PROFILE -> true;
@@ -253,15 +251,15 @@ public class ConversationalCommandService {
     private String cleanDetail(String value) {
         String result = normalize(value);
         result = trimConversationalEndings(result);
-        result = result.replaceAll("^[をにへがはの、とっていう\s]+", "");
-        result = result.replaceAll("[をにへがはの、とっていう\s]+$", "");
-        return result.replaceAll("\s+", " ").strip();
+        result = result.replaceAll("^[をにへがはの、とっていう\\s]+", "");
+        result = result.replaceAll("[をにへがはの、とっていう\\s]+$", "");
+        return result.replaceAll("\\s+", " ").strip();
     }
 
     private String trimConversationalEndings(String value) {
         String result = value.strip();
         String[] endings = {
-                "してもらえる", "してもらえる？", "してもらえる?", "してほしい", "お願いしたい",
+                "してもらえる？", "してもらえる?", "してもらえる", "してほしい", "お願いしたい",
                 "なんだよね", "んだよね", "なんだけど", "んだけど", "と思ってる", "と思って",
                 "お願い", "よろしく", "かな", "です", "だよね", "だよ"
         };
@@ -284,7 +282,7 @@ public class ConversationalCommandService {
             case SCHEDULE -> List.of("スケジュール", "予定");
             case MEMO -> List.of("メモ");
             case SHOPPING -> List.of("買い物リスト", "買うもの", "買い物");
-            case EXPENSE -> List.of("家計簿", "支出", "出費");
+            case EXPENSE -> List.of("家計簿", "支出", "出費", "お金");
             case HABIT -> List.of("ルーティン", "習慣");
             case WEATHER -> List.of("天気");
             case STATS -> List.of("利用状況", "統計", "成績");
