@@ -51,7 +51,7 @@ public class LineWebhookController {
     public Map<String, String> index() {
         return Map.of(
                 "app", "benly",
-                "version", "0.6.0",
+                "version", "0.6.1",
                 "status", "running",
                 "storage", "postgresql",
                 "naturalLanguage", "rule-based",
@@ -196,21 +196,22 @@ public class LineWebhookController {
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
         bubble.put("size", "mega");
-        bubble.put("header", box("#FFDDF0", "20px", List.of(
-                text("BENLY POP", "xs", "bold", "#A14D78", "center"),
-                text("きょうも、ちょっと便利に。", "xl", "bold", "#503B49", "center"),
-                text("予定・天気・メモをカードから選べるよ", "sm", "regular", "#765E6C", "center")
+        bubble.put("header", box("#FFDDF0", "18px", List.of(
+                text("ベンリー", "xl", "bold", "#503B49", "center"),
+                text("きょうも、ちょっと便利に。", "md", "bold", "#765E6C", "center"),
+                text("使いたい機能を選んでね", "sm", "regular", "#765E6C", "center")
         )));
-        bubble.put("body", box("#FFF9FC", "16px", List.of(
-                buttonRow(button("TODAY 予定", "今日の予定", "#80B8F0"), button("LIST 予定一覧", "予定一覧", "#6CA6E5")),
-                buttonRow(button("ADD 予定", "明日19時 ", "#8DCAF1"), button("LOOP 繰り返し", "毎週月曜19時 ", "#9F9BE8")),
-                buttonRow(button("TODAY 天気", "今日の天気", "#F2B95F"), button("TOMORROW 天気", "明日の天気", "#E9A95E")),
-                buttonRow(button("MEMO メモ", "メモ一覧", "#EFA6C6"), button("TASK タスク", "タスク一覧", "#78CDBB")),
-                buttonRow(button("SHOP 買い物", "買い物一覧", "#F0B878"), button("NOTICE 通知", "通知設定", "#9BB8EA")),
-                buttonRow(button("HELP 使い方", "ヘルプ", "#A995D8"), button("DATA 設定", "プライバシー", "#AEBBCF"))
+        bubble.put("body", box("#FFF9FC", "12px", List.of(
+                buttonRow(button("今日の予定", "今日の予定", "#80B8F0"), button("予定一覧", "予定一覧", "#6CA6E5")),
+                buttonRow(button("予定を追加", "明日19時 ", "#8DCAF1"), button("繰り返し予定", "毎週月曜19時 ", "#9F9BE8")),
+                buttonRow(button("今日の天気", "今日の天気", "#F2B95F"), button("明日の天気", "明日の天気", "#E9A95E")),
+                buttonRow(button("メモ", "メモ一覧", "#EFA6C6"), button("タスク", "タスク一覧", "#78CDBB")),
+                buttonRow(button("買い物", "買い物一覧", "#F0B878"), button("通知設定", "通知設定", "#9BB8EA")),
+                buttonRow(button("使い方", "ヘルプ", "#A995D8"), button("個人データ", "プライバシー", "#AEBBCF"))
         )));
-        bubble.put("footer", box("#F9EAF3", "12px", List.of(
-                text("例：あさって19時 歯医者 / 毎週月曜19時 ジム", "xs", "regular", "#765E6C", "center")
+        bubble.put("footer", box("#F9EAF3", "10px", List.of(
+                text("例：あさって19時 歯医者", "xs", "regular", "#765E6C", "center"),
+                text("例：毎週月曜19時 ジム", "xs", "regular", "#765E6C", "center")
         )));
         return bubble;
     }
@@ -219,18 +220,19 @@ public class LineWebhookController {
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
         bubble.put("size", "mega");
-        bubble.put("header", box("#EDE3FF", "20px", List.of(
-                text("BENLY GUIDE", "xs", "bold", "#71599B", "center"),
-                text("できることを選んでね", "xl", "bold", "#4D426B", "center")
+        bubble.put("header", box("#EDE3FF", "18px", List.of(
+                text("ベンリーの使い方", "xl", "bold", "#4D426B", "center"),
+                text("知りたい機能を選んでね", "sm", "regular", "#6D6287", "center")
         )));
-        bubble.put("body", box("#FCFAFF", "16px", List.of(
-                buttonRow(button("SCHEDULE 予定", "予定ヘルプ", "#7EAEE8"), button("WEATHER 天気", "天気ヘルプ", "#E7B45E")),
-                buttonRow(button("MEMO メモ", "メモヘルプ", "#ECAFC4"), button("TASK タスク", "タスクヘルプ", "#82CDBF")),
-                buttonRow(button("SHOP 買い物", "買い物ヘルプ", "#E9B86F"), button("NOTICE 通知", "通知ヘルプ", "#9AB9E6")),
-                buttonRow(button("PRIVACY データ", "プライバシー", "#AAB8CF"), button("HOME 戻る", "ホーム", "#BBA4DE"))
+        bubble.put("body", box("#FCFAFF", "12px", List.of(
+                buttonRow(button("予定", "予定ヘルプ", "#7EAEE8"), button("天気", "天気ヘルプ", "#E7B45E")),
+                buttonRow(button("メモ", "メモヘルプ", "#ECAFC4"), button("タスク", "タスクヘルプ", "#82CDBF")),
+                buttonRow(button("買い物", "買い物ヘルプ", "#E9B86F"), button("通知", "通知ヘルプ", "#9AB9E6")),
+                buttonRow(button("個人データ", "プライバシー", "#AAB8CF"), button("ホームへ戻る", "ホーム", "#BBA4DE"))
         )));
-        bubble.put("footer", box("#F2EEFA", "12px", List.of(
-                text("自然文：牛乳ほしい / 明日傘いる？ / 毎日8時 薬", "xs", "regular", "#756C86", "center")
+        bubble.put("footer", box("#F2EEFA", "10px", List.of(
+                text("自然な文章でも使えるよ", "xs", "bold", "#6D6287", "center"),
+                text("牛乳ほしい / 明日傘いる？ / 毎日8時 薬", "xs", "regular", "#756C86", "center")
         )));
         return bubble;
     }
@@ -239,18 +241,17 @@ public class LineWebhookController {
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
         bubble.put("size", "mega");
-        bubble.put("header", box("#DDEBFF", "18px", List.of(
-                text("NOTICE SETTINGS", "xs", "bold", "#526D82", "center"),
+        bubble.put("header", box("#DDEBFF", "16px", List.of(
                 text("通知設定", "xl", "bold", "#334E68", "center"),
                 text("天気地域：" + settings.area(), "xs", "regular", "#526D82", "center")
         )));
-        bubble.put("body", box("#FAFCFF", "16px", List.of(
+        bubble.put("body", box("#FAFCFF", "12px", List.of(
                 toggleButton("朝のお知らせ", "朝", settings.morning(), "#E6A93A"),
                 toggleButton("雨のお知らせ", "雨", settings.rain(), "#4A90D9"),
-                toggleButton("予定リマインド", "予定", settings.schedule(), "#668FD8"),
-                toggleButton("タスクリマインド", "タスク", settings.task(), "#4AAE9E"),
+                toggleButton("予定のお知らせ", "予定", settings.schedule(), "#668FD8"),
+                toggleButton("タスクのお知らせ", "タスク", settings.task(), "#4AAE9E"),
                 toggleButton("夜のまとめ", "夜", settings.night(), "#7765B5"),
-                button("GUIDE 通知の使い方", "通知ヘルプ", "#7F91B5")
+                button("通知の使い方", "通知ヘルプ", "#7F91B5")
         )));
         return bubble;
     }
@@ -267,7 +268,7 @@ public class LineWebhookController {
     }
 
     private Map<String, Object> toggleButton(String label, String type, boolean enabled, String enabledColor) {
-        return button(label + "  " + (enabled ? "ON" : "OFF"), "通知切替 " + type,
+        return button(label + "  " + (enabled ? "オン" : "オフ"), "通知切替 " + type,
                 enabled ? enabledColor : "#8B949C");
     }
 
@@ -305,14 +306,14 @@ public class LineWebhookController {
 
     private Map<String, Object> quickReplyMenu() {
         return Map.of("items", List.of(
-                quickReply("HELP", "ヘルプ"),
-                quickReply("HOME", "ホーム"),
-                quickReply("WEATHER", "今日の天気"),
-                quickReply("SCHEDULE", "予定一覧"),
-                quickReply("MEMO", "メモ一覧"),
-                quickReply("TASK", "タスク一覧"),
-                quickReply("SHOP", "買い物一覧"),
-                quickReply("NOTICE", "通知設定")
+                quickReply("ヘルプ", "ヘルプ"),
+                quickReply("ホーム", "ホーム"),
+                quickReply("天気", "今日の天気"),
+                quickReply("予定", "予定一覧"),
+                quickReply("メモ", "メモ一覧"),
+                quickReply("タスク", "タスク一覧"),
+                quickReply("買い物", "買い物一覧"),
+                quickReply("通知", "通知設定")
         ));
     }
 
