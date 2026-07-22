@@ -33,16 +33,17 @@ public class PrivacyCommandService {
             return "入力が長すぎるよ！1回のメッセージは1000文字以内にしてね。";
         }
 
-        if (text.equals("リッチメニュー状態")) {
-            return "リッチメニュー状態：" + richMenuSetupService.status();
+        if (text.equals("リッチメニュー状態") || text.equals("リッチメニュー診断")) {
+            return "リッチメニュー診断\n" + richMenuSetupService.diagnosticStatus(userId);
         }
         if (text.equals("リッチメニュー再設定")) {
             try {
-                String id = richMenuSetupService.setupDefaultMenu();
-                return "リッチメニューを再設定したよ。\nID：" + id
-                        + "\n\nトークを閉じて開き直して確認してね。";
+                String id = richMenuSetupService.recreateForUser(userId);
+                return "リッチメニューを新しく作り直して、あなたのLINEへ直接紐付けたよ。\nID：" + id
+                        + "\n\nトークを一度閉じて開き直してね。";
             } catch (Exception e) {
-                return "リッチメニューの再設定に失敗したよ。\nRenderログで『Benly rich menu setup failed』を確認してね。";
+                return "リッチメニューの再設定に失敗したよ。\n\n"
+                        + richMenuSetupService.diagnosticStatus(userId);
             }
         }
 
