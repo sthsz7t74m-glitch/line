@@ -10,22 +10,26 @@ import java.util.List;
 public class RpgService {
     private final BenlyStore store;
     private final JdbcTemplate jdbc;
+    private final DailyProgressService dailyProgressService;
 
-    public RpgService(BenlyStore store, JdbcTemplate jdbc) {
+    public RpgService(BenlyStore store, JdbcTemplate jdbc, DailyProgressService dailyProgressService) {
         this.store = store;
         this.jdbc = jdbc;
+        this.dailyProgressService = dailyProgressService;
     }
 
     public boolean supports(String raw) {
         String text = normalize(raw);
         return text.equals("プロフィール") || text.equals("ステータス")
                 || text.equals("レベル") || text.equals("経験値") || text.equals("称号")
-                || text.equals("実績") || text.equals("実績一覧") || text.equals("バッジ");
+                || text.equals("実績") || text.equals("実績一覧") || text.equals("バッジ")
+                || dailyProgressService.supports(text);
     }
 
     public String handle(String userId, String raw) {
         String text = normalize(raw);
         store.ensureUser(userId);
+        if (dailyProgressService.supports(text)) return dailyProgressService.handle(userId, text);
         return text.equals("実績") || text.equals("実績一覧") || text.equals("バッジ")
                 ? achievements(userId) : profile(userId);
     }
@@ -53,6 +57,8 @@ public class RpgService {
                 買い物完了 %d件
                 登録した予定 %d件
                 保存中のメモ %d件
+
+                『今日のミッション』『統計』『カレンダー』も使えるよ。
                 """.formatted(level, title(level), exp, gauge, progress, remaining,
                 unlocked, achievementList(stats, exp).size(), stats.completedTasks(),
                 stats.purchasedItems(), stats.schedules(), stats.memos()).strip();
