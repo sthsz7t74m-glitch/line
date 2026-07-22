@@ -32,6 +32,26 @@ public class NotificationDataStore {
         ), Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
     }
 
+    public List<UpcomingTask> upcomingTasks(OffsetDateTime from, OffsetDateTime to) {
+        return jdbc.query("""
+                select t.id, t.line_user_id, t.title, t.priority, t.due_at, t.reminder_minutes
+                from tasks t
+                join user_settings u on u.line_user_id = t.line_user_id
+                where u.task_notification = true
+                  and t.completed = false
+                  and t.due_at is not null
+                  and t.due_at >= ? and t.due_at < ?
+                order by t.due_at
+                """, (rs, rowNum) -> new UpcomingTask(
+                rs.getLong("id"),
+                rs.getString("line_user_id"),
+                rs.getString("title"),
+                rs.getString("priority"),
+                rs.getTimestamp("due_at").toInstant().atOffset(ZoneOffset.ofHours(9)),
+                rs.getString("reminder_minutes")
+        ), Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
+    }
+
     public List<DueTask> dueTasks(LocalDate date, ZoneOffset offset) {
         OffsetDateTime start = date.atStartOfDay().atOffset(offset);
         OffsetDateTime end = start.plusDays(1);
@@ -95,6 +115,8 @@ public class NotificationDataStore {
 
     public record UpcomingSchedule(long id, String userId, String title,
                                    OffsetDateTime startsAt, String reminderMinutes) {}
+    public record UpcomingTask(long id, String userId, String title, String priority,
+                               OffsetDateTime dueAt, String reminderMinutes) {}
     public record DueTask(long id, String userId, String title, OffsetDateTime dueAt) {}
     public record NightSummary(int completedTasks, int tomorrowSchedules, int gainedExperience) {}
 }
