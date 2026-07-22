@@ -110,6 +110,28 @@ public class LinePushService {
         send(userId, flex);
     }
 
+    public void pushHabitReminder(String userId, long habitId, String name) {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "kilo");
+        bubble.put("header", box("#DFF5EA", "16px", List.of(
+                text("習慣のお知らせ", "xl", "bold", "#315B49", "center"),
+                text("今日も少しずつ続けよう", "sm", "regular", "#587767", "center")
+        )));
+        bubble.put("body", box("#FAFFFC", "18px", List.of(
+                text(name, "xl", "bold", "#29483B", "center")
+        )));
+        bubble.put("footer", box("#EAF8F1", "12px", List.of(
+                buttonRow(button("できた", "習慣達成ID " + habitId, "#55A77E"),
+                        button("今日の一覧", "今日の習慣", "#7CB39A"))
+        )));
+        Map<String, Object> flex = new LinkedHashMap<>();
+        flex.put("type", "flex");
+        flex.put("altText", "習慣のお知らせ：" + name);
+        flex.put("contents", bubble);
+        send(userId, flex);
+    }
+
     private String reminderTiming(int minutesBefore) {
         if (minutesBefore == 0) return "予定の時間になったよ";
         if (minutesBefore == 30 * 24 * 60) return "1か月前のお知らせ";
