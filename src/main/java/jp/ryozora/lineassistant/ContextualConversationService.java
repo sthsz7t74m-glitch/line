@@ -26,13 +26,14 @@ public class ContextualConversationService {
     }
 
     private void initialize() {
+        // Use the SQL-standard type name so this works on both PostgreSQL and the H2 test database.
         jdbc.execute("""
                 create table if not exists conversation_references (
                   line_user_id varchar(255) primary key,
                   domain varchar(32) not null,
                   selected_number integer,
                   pending_action varchar(32),
-                  updated_at timestamptz not null default now()
+                  updated_at timestamp with time zone not null default current_timestamp
                 )
                 """);
     }
@@ -125,13 +126,8 @@ public class ContextualConversationService {
 
     private void save(String userId, String domain, Integer number, String pendingAction) {
         jdbc.update("""
-                insert into conversation_references(line_user_id, domain, selected_number, pending_action, updated_at)
-                values (?, ?, ?, ?, now())
-                on conflict (line_user_id) do update set
-                  domain = excluded.domain,
-                  selected_number = excluded.selected_number,
-                  pending_action = excluded.pending_action,
-                  updated_at = now()
+                merge into conversation_references key(line_user_id)
+                values (?, ?, ?, ?, current_timestamp)
                 """, userId, domain, number, pendingAction);
     }
 
