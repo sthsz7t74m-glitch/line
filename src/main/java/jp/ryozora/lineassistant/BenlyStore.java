@@ -1,0 +1,169 @@
+package jp.ryozora.lineassistant;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.sql.Timestamp;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+
+@Repository
+public class BenlyStore {
+    private final JdbcTemplate jdbc;
+
+    public BenlyStore(JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    public void ensureUser(String userId) {
+        jdbc.update("""
+                insert into benly_users(line_user_id)
+                values (?)
+                on conflict (line_user_id) do nothing
+                """, userId);
+        jdbc.update("""
+                insert into user_settings(line_user_id)
+                values (?)
+                on conflict (line_user_id) do nothing
+                """, userId);
+    }
+
+    public long addMemo(String userId, String content) {
+        ensureUser(userId);
+        Long id = jdbc.queryForObject("""
+                insert into memos(line_user_id, content)
+                values (?, ?)
+                returning id
+                """, Long.class, userId, content);
+        return id == null ? -1 : id;
+    }
+
+    public List<Item> listMemos(String userId) {
+        ensureUser(userId);
+        return jdbc.query("""
+                select id, content from memos
+                where line_user_id = ? and archived = false
+                order by created_at desc limit 30
+                """, (rs, rowNum) -> new Item(rs.getLong("id"), rs.getString("content")), userId);
+    }
+
+    public int clearMemos(String userId) {
+        return jdbc.update("delete from memos where line_user_id = ?", userId);
+    }
+
+    public long addTask(String userId, String title) {
+        ensureUser(userId);
+        Long id = jdbc.queryForObject("""
+                insert into tasks(line_user_id, title)
+                values (?, ?)
+                returning id
+                """, Long.class, userId, title);
+        return id == null ? -1 : id;
+    }
+
+    public List<Item> listTasks(String userId) {
+        ensureUser(userId);
+        return jdbc.query("""
+                select id, title from tasks
+                where line_user_id = ? and completed = false
+                order by case priority when 'HIGH' then 1 when 'MEDIUM' then 2 else 3 end,
+                         due_at nulls last, created_at
+                limit 30
+                """, (rs, rowNum) -> new Item(rs.getLong("id"), rs.getString("title")), userId);
+    }
+
+    @Transactional
+    public boolean completeTask(String userId, long id) {
+        int changed = jdbc.update("""
+                update tasks set completed = true, completed_at = current_timestamp
+                where id = ? and line_user_id = ? and completed = false
+                """, id, userId);
+        if (changed == 1) {
+            addExperience(userId, 10, "TASK_COMPLETED");
+            return true;
+        }
+        return false;
+    }
+
+    public long addShoppingItem(String userId, String name) {
+        ensureUser(userId);
+        Long id = jdbc.queryForObject("""
+                insert into shopping_items(line_user_id, name)
+                values (?, ?)
+                returning id
+                """, Long.class, userId, name);
+        return id == null ? -1 : id;
+    }
+
+    public List<Item> listShoppingItems(String userId) {
+        ensureUser(userId);
+        return jdbc.query("""
+                select id, name from shopping_items
+                where line_user_id = ? and purchased = false
+                order by created_at
+                limit 50
+                """, (rs, rowNum) -> new Item(rs.getLong("id"), rs.getString("name")), userId);
+    }
+
+    @Transactional
+    public boolean purchaseShoppingItem(String userId, long id) {
+        int changed = jdbc.update("""
+                update shopping_items set purchased = true, purchased_at = current_timestamp
+                where id = ? and line_user_id = ? and purchased = false
+                """, id, userId);
+        if (changed == 1) {
+            addExperience(userId, 5, "SHOPPING_COMPLETED");
+            return true;
+        }
+        return false;
+    }
+
+    public long addSchedule(String userId, String title, OffsetDateTime startsAt) {
+        ensureUser(userId);
+        Long id = jdbc.queryForObject("""
+                insert into schedules(line_user_id, title, starts_at)
+                values (?, ?, ?)
+                returning id
+                """, Long.class, userId, title, Timestamp.from(startsAt.toInstant()));
+        return id == null ? -1 : id;
+    }
+
+    public List<ScheduleItem> listTodaySchedules(String userId, ZoneOffset offset) {
+        ensureUser(userId);
+        OffsetDateTime now = OffsetDateTime.now(offset);
+        OffsetDateTime start = now.toLocalDate().atStartOfDay().atOffset(offset);
+        OffsetDateTime end = start.plusDays(1);
+        return jdbc.query("""
+                select id, title, starts_at from schedules
+                where line_user_id = ? and starts_at >= ? and starts_at < ?
+                order by starts_at
+                """, (rs, rowNum) -> new ScheduleItem(
+                        rs.getLong("id"),
+                        rs.getString("title"),
+                        rs.getTimestamp("starts_at").toInstant().atOffset(offset)
+                ), userId, Timestamp.from(start.toInstant()), Timestamp.from(end.toInstant()));
+    }
+
+    public int experience(String userId) {
+        ensureUser(userId);
+        Integer value = jdbc.queryForObject(
+                "select experience from benly_users where line_user_id = ?",
+                Integer.class,
+                userId
+        );
+        return value == null ? 0 : value;
+    }
+
+    private void addExperience(String userId, int points, String reason) {
+        ensureUser(userId);
+        jdbc.update("update benly_users set experience = experience + ?, updated_at = current_timestamp where line_user_id = ?",
+                points, userId);
+        jdbc.update("insert into experience_logs(line_user_id, points, reason) values (?, ?, ?)",
+                userId, points, reason);
+    }
+
+    public record Item(long id, String text) {}
+    public record ScheduleItem(long id, String title, OffsetDateTime startsAt) {}
+}
