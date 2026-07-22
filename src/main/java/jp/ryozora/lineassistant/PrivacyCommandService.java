@@ -7,13 +7,18 @@ public class PrivacyCommandService {
     public static final int MAX_MESSAGE_LENGTH = 1000;
     private final BenlyStore store;
     private final AiSecretaryService secretaryService;
+    private final ConversationalCommandService conversationalService;
     private final HabitService habitService;
     private final TaskService taskService;
 
-    public PrivacyCommandService(BenlyStore store, AiSecretaryService secretaryService,
-                                 HabitService habitService, TaskService taskService) {
+    public PrivacyCommandService(BenlyStore store,
+                                 AiSecretaryService secretaryService,
+                                 ConversationalCommandService conversationalService,
+                                 HabitService habitService,
+                                 TaskService taskService) {
         this.store = store;
         this.secretaryService = secretaryService;
+        this.conversationalService = conversationalService;
         this.habitService = habitService;
         this.taskService = taskService;
     }
@@ -30,8 +35,14 @@ public class PrivacyCommandService {
             return taskService.handle(userId, text);
         }
 
+        // Preserve the existing cross-feature secretary phrases first.
         if (secretaryService.supports(text)) {
             return secretaryService.handle(userId, text);
+        }
+
+        String conversationalResponse = conversationalService.handle(userId, text);
+        if (conversationalResponse != null) {
+            return conversationalResponse;
         }
 
         return switch (text) {
@@ -74,6 +85,7 @@ public class PrivacyCommandService {
                 ・LINE上の内部ユーザー識別子
                 ・入力したメモ、タスク、買い物、家計簿、習慣、予定
                 ・通知設定、地域設定、経験値履歴
+                ・入力待ちの会話状態（最大20分で失効）
 
                 【利用目的】
                 ベンリーの各機能と通知を提供するためだけに使います。
