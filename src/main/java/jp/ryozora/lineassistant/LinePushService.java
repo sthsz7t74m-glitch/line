@@ -82,7 +82,7 @@ public class LinePushService {
 
     public void pushScheduleReminder(String userId, long scheduleId, String title,
                                      OffsetDateTime startsAt, int minutesBefore) {
-        String timing = reminderTiming(minutesBefore);
+        String timing = reminderTiming(minutesBefore, false);
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
         bubble.put("size", "mega");
@@ -110,6 +110,41 @@ public class LinePushService {
         send(userId, flex);
     }
 
+    public void pushTaskReminder(String userId, long taskId, String title, String priority,
+                                 OffsetDateTime dueAt, int minutesBefore) {
+        String timing = reminderTiming(minutesBefore, true);
+        String priorityText = switch (priority == null ? "MEDIUM" : priority) {
+            case "HIGH" -> "優先度　高";
+            case "LOW" -> "優先度　低";
+            default -> "優先度　中";
+        };
+
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#DDF5EE", "18px", List.of(
+                text("タスクのお知らせ", "xl", "bold", "#315D50", "center"),
+                text(timing, "md", "bold", "#52776C", "center")
+        )));
+        bubble.put("body", box("#F8FFFC", "16px", List.of(
+                text(title, "xl", "bold", "#274A40", "center"),
+                text("期限　" + dueAt.format(DateTimeFormatter.ofPattern("M月d日(E) H:mm")),
+                        "md", "regular", "#52776C", "center"),
+                text(priorityText, "sm", "regular", "#6D817A", "center")
+        )));
+        bubble.put("footer", box("#EAF8F3", "12px", List.of(
+                buttonRow(button("完了", "タスク完了ID " + taskId, "#4FA77E"),
+                        button("1時間後", "タスク延期ID 60 " + taskId, "#6EADC2")),
+                button("明日に延期", "タスク延期ID 明日 " + taskId, "#8D83C4")
+        )));
+
+        Map<String, Object> flex = new LinkedHashMap<>();
+        flex.put("type", "flex");
+        flex.put("altText", "タスクのお知らせ：" + title + "（" + timing + "）");
+        flex.put("contents", bubble);
+        send(userId, flex);
+    }
+
     public void pushHabitReminder(String userId, long habitId, String name) {
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
@@ -132,8 +167,8 @@ public class LinePushService {
         send(userId, flex);
     }
 
-    private String reminderTiming(int minutesBefore) {
-        if (minutesBefore == 0) return "予定の時間になったよ";
+    private String reminderTiming(int minutesBefore, boolean task) {
+        if (minutesBefore == 0) return task ? "期限の時間になったよ" : "予定の時間になったよ";
         if (minutesBefore == 30 * 24 * 60) return "1か月前のお知らせ";
         if (minutesBefore % (7 * 24 * 60) == 0) return (minutesBefore / (7 * 24 * 60)) + "週間前のお知らせ";
         if (minutesBefore % (24 * 60) == 0) return (minutesBefore / (24 * 60)) + "日前のお知らせ";
@@ -182,7 +217,7 @@ public class LinePushService {
     private Map<String, Object> button(String label, String message, String color) {
         Map<String, Object> button = new LinkedHashMap<>();
         button.put("type", "button"); button.put("style", "primary"); button.put("height", "sm");
-        button.put("color", color); button.put("flex", 1);
+        button.put("color", color); button.put("flex", 1); button.put("adjustMode", "shrink-to-fit");
         button.put("action", Map.of("type", "message", "label", label, "text", message));
         return button;
     }
