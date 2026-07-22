@@ -6,9 +6,11 @@ import org.springframework.stereotype.Service;
 public class PrivacyCommandService {
     public static final int MAX_MESSAGE_LENGTH = 1000;
     private final BenlyStore store;
+    private final AiSecretaryService secretaryService;
 
-    public PrivacyCommandService(BenlyStore store) {
+    public PrivacyCommandService(BenlyStore store, AiSecretaryService secretaryService) {
         this.store = store;
+        this.secretaryService = secretaryService;
     }
 
     public String handle(String userId, String raw) {
@@ -16,6 +18,10 @@ public class PrivacyCommandService {
 
         if (text.length() > MAX_MESSAGE_LENGTH) {
             return "入力が長すぎるよ！1回のメッセージは1000文字以内にしてね。";
+        }
+
+        if (secretaryService.supports(text)) {
+            return secretaryService.handle(userId, text);
         }
 
         return switch (text) {
