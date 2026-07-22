@@ -210,6 +210,7 @@ public class BenlyStore {
                 count("memos", userId),
                 count("tasks", userId),
                 count("shopping_items", userId),
+                count("expenses", userId),
                 count("schedules", userId),
                 count("experience_logs", userId)
         );
@@ -224,7 +225,9 @@ public class BenlyStore {
     @Transactional
     public void deleteAllUserData(String userId) {
         // Every value is bound as a parameter. No user-provided text is concatenated into SQL.
+        jdbc.update("delete from daily_mission_rewards where line_user_id = ?", userId);
         jdbc.update("delete from experience_logs where line_user_id = ?", userId);
+        jdbc.update("delete from expenses where line_user_id = ?", userId);
         jdbc.update("delete from schedules where line_user_id = ?", userId);
         jdbc.update("delete from shopping_items where line_user_id = ?", userId);
         jdbc.update("delete from tasks where line_user_id = ?", userId);
@@ -244,5 +247,6 @@ public class BenlyStore {
 
     public record Item(long id, String text) {}
     public record ScheduleItem(long id, String title, OffsetDateTime startsAt) {}
-    public record DataSummary(int memos, int tasks, int shoppingItems, int schedules, int experienceLogs) {}
+    public record DataSummary(int memos, int tasks, int shoppingItems, int expenses,
+                              int schedules, int experienceLogs) {}
 }
