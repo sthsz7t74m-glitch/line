@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.time.format.TextStyle;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.Locale;
@@ -63,7 +62,7 @@ public class SchedulePartialEditService {
         boolean dateChanged = false;
         boolean timeChanged = false;
 
-        DateMatch dateMatch = parseDate(remainder, currentDate);
+        DateMatch dateMatch = parseDate(remainder);
         if (dateMatch != null) {
             date = dateMatch.date();
             remainder = removeRange(remainder, dateMatch.start(), dateMatch.end());
@@ -92,14 +91,15 @@ public class SchedulePartialEditService {
         return new Patch(date, time, title, dateChanged, timeChanged, titleChanged);
     }
 
-    private DateMatch parseDate(String input, LocalDate baseDate) {
+    private DateMatch parseDate(String input) {
+        LocalDate today = LocalDate.now(TOKYO);
         String lower = input.toLowerCase(Locale.ROOT);
         for (String token : List.of("明後日", "あさって", "明日", "あした", "今日", "きょう")) {
             int index = lower.indexOf(token);
             if (index >= 0) {
                 int plus = token.equals("明後日") || token.equals("あさって") ? 2
                         : token.equals("明日") || token.equals("あした") ? 1 : 0;
-                return new DateMatch(baseDate.plusDays(plus), index, index + token.length());
+                return new DateMatch(today.plusDays(plus), index, index + token.length());
             }
         }
 
@@ -116,9 +116,9 @@ public class SchedulePartialEditService {
         Matcher shortDate = SHORT_DATE.matcher(input);
         if (shortDate.find()) {
             try {
-                LocalDate candidate = LocalDate.of(baseDate.getYear(), Integer.parseInt(shortDate.group(1)),
+                LocalDate candidate = LocalDate.of(today.getYear(), Integer.parseInt(shortDate.group(1)),
                         Integer.parseInt(shortDate.group(2)));
-                if (candidate.isBefore(LocalDate.now(TOKYO).minusDays(1))) candidate = candidate.plusYears(1);
+                if (candidate.isBefore(today.minusDays(1))) candidate = candidate.plusYears(1);
                 return new DateMatch(candidate, shortDate.start(), shortDate.end());
             } catch (DateTimeException ignored) {
                 return null;
@@ -136,8 +136,16 @@ public class SchedulePartialEditService {
                 case "土" -> java.time.DayOfWeek.SATURDAY;
                 default -> java.time.DayOfWeek.SUNDAY;
             };
-            LocalDate candidate = baseDate.with(TemporalAdjusters.nextOrSame(target));
-            if ("来週".equals(weekday.group(1))) candidate = candidate.plusWeeks(1);
+            LocalDate candidate;
+            if ("今週".equals(weekday.group(1))) {
+                int delta = target.getValue() - today.getDayOfWeek().getValue();
+                candidate = delta >= 0 ? today.plusDays(delta) : today.with(TemporalAdjusters.next(target));
+            } else if ("来週".equals(weekday.group(1))) {
+                LocalDate nextMonday = today.with(TemporalAdjusters.next(java.time.DayOfWeek.MONDAY));
+                candidate = nextMonday.plusDays(target.getValue() - 1L);
+            } else {
+                candidate = today.with(TemporalAdjusters.nextOrSame(target));
+            }
             return new DateMatch(candidate, weekday.start(), weekday.end());
         }
         return null;
