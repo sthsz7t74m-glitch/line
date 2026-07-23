@@ -3,7 +3,7 @@ WORKDIR /app
 COPY pom.xml .
 RUN mvn -B -Dmaven.test.skip=true dependency:go-offline
 COPY src src
-RUN sh -c 'mvn -B -Dmaven.test.skip=true package > /tmp/maven-build.log 2>&1 || { echo "===== MAVEN BUILD ERROR (last 200 lines) ====="; tail -n 200 /tmp/maven-build.log; exit 1; }'
+RUN sh -c 'mvn -B -Dmaven.test.skip=true package > /tmp/maven-build.log 2>&1 || { echo "===== COMPILATION ERRORS ====="; grep -E "\[ERROR\]|COMPILATION ERROR|cannot find symbol|incompatible types|not applicable|does not exist|is already defined" /tmp/maven-build.log | tail -n 80; echo "===== END COMPILATION ERRORS ====="; exit 1; }'
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
