@@ -4,8 +4,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @Component
@@ -27,7 +29,8 @@ public class NotificationHistoryStore {
                 insert into notification_history(line_user_id,notification_type,summary,delivery_status,sent_at)
                 values (?,?,?,?,current_timestamp)
                 """, userId, safeType, safeSummary, "SENT");
-        jdbc.update("delete from notification_history where sent_at < current_timestamp - interval '90 days'");
+        jdbc.update("delete from notification_history where sent_at < ?",
+                Timestamp.from(Instant.now().minus(90, ChronoUnit.DAYS)));
     }
 
     public List<Entry> list(String userId) {
