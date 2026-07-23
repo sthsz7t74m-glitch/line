@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -80,8 +81,74 @@ public class LinePushService {
         send(userId, flex);
     }
 
+    public void pushRainAlert(String userId, String area, String rainTime, int probability,
+                              String source, LocalDateTime fetchedAt) {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#E5F3FF", "16px", List.of(
+                text("雨のお知らせ", "xl", "bold", "#2E6FC4", "start"),
+                text(area, "sm", "regular", "#617184", "start")
+        )));
+        bubble.put("body", box("#FCFDFE", "14px", List.of(
+                card("#EEF6FF", List.of(
+                        text(rainTime + "ごろから雨の可能性", "lg", "bold", "#2E6FC4", "start"),
+                        text("降水確率　" + probability + "%", "md", "bold", "#334E68", "start")
+                )),
+                card("#FFF8E8", List.of(
+                        text("傘を忘れずに！", "sm", "bold", "#72551E", "start")
+                )),
+                text("取得元：" + source + "　更新："
+                                + fetchedAt.format(DateTimeFormatter.ofPattern("M/d H:mm")),
+                        "xxs", "regular", "#8A96A6", "start")
+        )));
+        bubble.put("footer", box("#F2F7FC", "12px", List.of(
+                buttonRow(button("今日の天気", "今日の天気", "#4F7FC7"),
+                        button("通知設定", "通知設定", "#7898CF")),
+                button("🏠 ホーム", "ホーム", "#8793A5")
+        )));
+
+        Map<String, Object> flex = new LinkedHashMap<>();
+        flex.put("type", "flex");
+        flex.put("altText", "雨のお知らせ：" + area + "で" + rainTime + "ごろから雨の可能性");
+        flex.put("contents", bubble);
+        send(userId, flex);
+    }
+
+    public void pushNightSummary(String userId, int completedTasks, int gainedExperience, int tomorrowSchedules) {
+        Map<String, Object> bubble = new LinkedHashMap<>();
+        bubble.put("type", "bubble");
+        bubble.put("size", "mega");
+        bubble.put("header", box("#EFE7FF", "16px", List.of(
+                text("今日もお疲れさま！", "xl", "bold", "#7957C7", "center"),
+                text("今日のまとめ", "sm", "regular", "#6D6287", "center")
+        )));
+        bubble.put("body", box("#FCFDFE", "14px", List.of(
+                card("#F8F4FF", List.of(
+                        text("完了タスク　" + completedTasks + "件", "lg", "bold", "#4D426B", "start"),
+                        text("経験値　+" + gainedExperience, "md", "bold", "#7957C7", "start")
+                )),
+                card("#F5F8FD", List.of(
+                        text("明日の予定　" + tomorrowSchedules + "件", "md", "bold", "#334E68", "start"),
+                        text(tomorrowSchedules == 0 ? "明日は予定に余裕がありそう" : "明日の準備も少しだけ確認しよう",
+                                "sm", "regular", "#617184", "start")
+                ))
+        )));
+        bubble.put("footer", box("#F4F0FC", "12px", List.of(
+                buttonRow(button("今日の状況", "今日のダッシュボード", "#7957C7"),
+                        button("明日の予定", "予定一覧", "#6F8FC7")),
+                button("🏠 ホーム", "ホーム", "#8793A5")
+        )));
+
+        Map<String, Object> flex = new LinkedHashMap<>();
+        flex.put("type", "flex");
+        flex.put("altText", "今日のまとめ：完了タスク" + completedTasks + "件、経験値+" + gainedExperience);
+        flex.put("contents", bubble);
+        send(userId, flex);
+    }
+
     public void pushScheduleReminder(String userId, long scheduleId, String title,
-                                     OffsetDateTime startsAt, int minutesBefore) {
+                                      OffsetDateTime startsAt, int minutesBefore) {
         String timing = reminderTiming(minutesBefore, false);
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
@@ -199,6 +266,13 @@ public class LinePushService {
         box.put("type", "box"); box.put("layout", "vertical"); box.put("backgroundColor", backgroundColor);
         box.put("paddingAll", padding); box.put("spacing", "md"); box.put("contents", contents);
         return box;
+    }
+
+    private Map<String, Object> card(String backgroundColor, List<Map<String, Object>> contents) {
+        Map<String, Object> value = box(backgroundColor, "12px", contents);
+        value.put("cornerRadius", "12px");
+        value.put("spacing", "xs");
+        return value;
     }
 
     private Map<String, Object> separator() {
