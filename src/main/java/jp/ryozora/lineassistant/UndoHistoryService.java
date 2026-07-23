@@ -6,6 +6,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Date;
+import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -103,15 +105,18 @@ public class UndoHistoryService {
             var meta = rs.getMetaData();
             for (int i = 1; i <= meta.getColumnCount(); i++) {
                 String name = meta.getColumnLabel(i);
-                if (!"id".equals(name)) {
-                    Object value = rs.getObject(i);
-                    if (value instanceof Timestamp timestamp) value = timestamp.toInstant().toString();
-                    values.put(name, value);
-                }
+                if (!"id".equals(name)) values.put(name, serializable(rs.getObject(i)));
             }
             return List.of(new Snapshot(entityType, rs.getLong("id"), values, description));
         }, userId, number - 1);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private Object serializable(Object value) {
+        if (value instanceof Timestamp timestamp) return timestamp.toInstant().toString();
+        if (value instanceof Date date) return date.toLocalDate().toString();
+        if (value instanceof Time time) return time.toLocalTime().toString();
+        return value;
     }
 
     private int restore(String userId, String type, long id, Map<String, Object> v) {
@@ -132,11 +137,11 @@ public class UndoHistoryService {
             case "HABIT" -> jdbc.update("""
                     update habits set name=?,active_days=?,reminder_time=?,active=?,updated_at=current_timestamp
                     where id=? and line_user_id=?
-                    """, v.get("name"), v.get("active_days"), v.get("reminder_time"), v.get("active"), id, userId);
+                    """, v.get("name"), v.get("active_days"), time(v.get("reminder_time")), v.get("active"), id, userId);
             case "EXPENSE" -> jdbc.update("""
                     update expenses set amount=?,description=?,category=?,spent_on=?,updated_at=current_timestamp
                     where id=? and line_user_id=?
-                    """, v.get("amount"), v.get("description"), v.get("category"), v.get("spent_on"), id, userId);
+                    """, v.get("amount"), v.get("description"), v.get("category"), date(v.get("spent_on")), id, userId);
             default -> 0;
         };
     }
@@ -144,6 +149,14 @@ public class UndoHistoryService {
     private Timestamp timestamp(Object value) {
         if (value == null) return null;
         return Timestamp.from(Instant.parse(value.toString()));
+    }
+
+    private Time time(Object value) {
+        return value == null ? null : Time.valueOf(value.toString());
+    }
+
+    private Date date(Object value) {
+        return value == null ? null : Date.valueOf(value.toString());
     }
 
     private record Snapshot(String entityType, long entityId, Map<String, Object> values, String description) {}
