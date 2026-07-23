@@ -17,7 +17,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 public class ContextualInputFilter extends OncePerRequestFilter {
     private static final Pattern START = Pattern.compile(
             "^(メモ編集案内|タスク変更案内|タスク延期案内|予定変更案内|習慣編集案内|支出編集案内)\\s+(\\d+)$");
@@ -25,7 +25,8 @@ public class ContextualInputFilter extends OncePerRequestFilter {
     private static final Set<String> NAVIGATION = Set.of(
             "ホーム", "ベンリー", "トップ", "戻る", "← 戻る", "前へ戻る",
             "予定メニュー", "記録メニュー", "お金メニュー", "成長メニュー",
-            "操作メニュー", "メモ一覧", "タスク一覧", "予定一覧", "習慣一覧", "支出一覧");
+            "操作メニュー", "メモ一覧", "タスク一覧", "予定一覧", "習慣一覧", "支出一覧",
+            "元に戻す", "取り消す", "直前の変更を戻す", "↩ 元に戻す");
 
     private final LineWebhookSupport webhook;
     private final PendingInputContext context;
