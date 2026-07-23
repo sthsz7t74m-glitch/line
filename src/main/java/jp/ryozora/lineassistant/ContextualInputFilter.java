@@ -33,19 +33,22 @@ public class ContextualInputFilter extends OncePerRequestFilter {
     private final TaskService taskService;
     private final SchedulePartialEditService schedulePartialEditService;
     private final ContextualPartialEditService partialEditService;
+    private final UndoHistoryService undoHistoryService;
 
     public ContextualInputFilter(LineWebhookSupport webhook,
                                  PendingInputContext context,
                                  BenlyCommandService commandService,
                                  TaskService taskService,
                                  SchedulePartialEditService schedulePartialEditService,
-                                 ContextualPartialEditService partialEditService) {
+                                 ContextualPartialEditService partialEditService,
+                                 UndoHistoryService undoHistoryService) {
         this.webhook = webhook;
         this.context = context;
         this.commandService = commandService;
         this.taskService = taskService;
         this.schedulePartialEditService = schedulePartialEditService;
         this.partialEditService = partialEditService;
+        this.undoHistoryService = undoHistoryService;
     }
 
     @Override
@@ -93,8 +96,10 @@ public class ContextualInputFilter extends OncePerRequestFilter {
                     return;
                 }
 
+                Long historyId = undoHistoryService.capture(event.userId(), pending.type(), pending.number());
                 String result = execute(event.userId(), pending, input);
                 if (isFailure(result)) {
+                    undoHistoryService.discard(historyId);
                     webhook.reply(event.replyToken(), List.of(retryMessage(pending, result)));
                 } else {
                     context.clear(event.userId());
@@ -206,6 +211,7 @@ public class ContextualInputFilter extends OncePerRequestFilter {
                 )),
                 FlexUi.vertical("#FCFDFE", "12px", "sm", List.of(
                         FlexUi.card("#F7FBFA", "10px", "xs", lines),
+                        FlexUi.button("↩ 元に戻す", "元に戻す", "#C68A2B"),
                         FlexUi.horizontal(List.of(
                                 FlexUi.button("一覧を見る", listCommand(pending.type()), "#667EA8"),
                                 FlexUi.button("🏠 ホーム", "ホーム", "#8793A5")
