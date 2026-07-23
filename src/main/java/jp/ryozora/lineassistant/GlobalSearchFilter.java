@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -79,14 +80,15 @@ public class GlobalSearchFilter extends OncePerRequestFilter {
                 where line_user_id=? and archived=false
                   and (lower(content) like ? or lower(coalesce(tags,'')) like ?)
                 order by favorite desc,created_at desc limit ?
-                """, rs -> results.add(new Result("メモ", rs.getString("content"), "#D989AD", "メモ一覧")),
-                userId, pattern, pattern, PER_TYPE);
+                """, (RowCallbackHandler) rs -> {
+            results.add(new Result("メモ", rs.getString("content"), "#D989AD", "メモ一覧"));
+        }, userId, pattern, pattern, PER_TYPE);
 
         jdbc.query("""
                 select title,due_at from tasks
                 where line_user_id=? and completed=false and lower(title) like ?
                 order by due_at nulls last,created_at limit ?
-                """, rs -> {
+                """, (RowCallbackHandler) rs -> {
             Timestamp due = rs.getTimestamp("due_at");
             String detail = rs.getString("title");
             if (due != null) detail += "　期限 " + due.toInstant().atZone(TOKYO)
@@ -98,14 +100,15 @@ public class GlobalSearchFilter extends OncePerRequestFilter {
                 select name from shopping_items
                 where line_user_id=? and purchased=false and lower(name) like ?
                 order by created_at limit ?
-                """, rs -> results.add(new Result("買い物", rs.getString("name"), "#D89A34", "買い物一覧")),
-                userId, pattern, PER_TYPE);
+                """, (RowCallbackHandler) rs -> {
+            results.add(new Result("買い物", rs.getString("name"), "#D89A34", "買い物一覧"));
+        }, userId, pattern, PER_TYPE);
 
         jdbc.query("""
                 select title,starts_at from schedules
                 where line_user_id=? and lower(title) like ?
                 order by starts_at desc limit ?
-                """, rs -> {
+                """, (RowCallbackHandler) rs -> {
             Timestamp at = rs.getTimestamp("starts_at");
             String detail = rs.getString("title");
             if (at != null) detail += "　" + at.toInstant().atZone(TOKYO)
@@ -117,10 +120,12 @@ public class GlobalSearchFilter extends OncePerRequestFilter {
                 select description,amount,spent_on from expenses
                 where line_user_id=? and (lower(description) like ? or lower(category) like ?)
                 order by spent_on desc,id desc limit ?
-                """, rs -> results.add(new Result("支出",
-                        rs.getString("description") + "　" + String.format("%,d円", rs.getInt("amount"))
-                                + "　" + rs.getDate("spent_on").toLocalDate().format(DateTimeFormatter.ofPattern("M/d")),
-                        "#C68A2B", "支出一覧")), userId, pattern, pattern, PER_TYPE);
+                """, (RowCallbackHandler) rs -> {
+            results.add(new Result("支出",
+                    rs.getString("description") + "　" + String.format("%,d円", rs.getInt("amount"))
+                            + "　" + rs.getDate("spent_on").toLocalDate().format(DateTimeFormatter.ofPattern("M/d")),
+                    "#C68A2B", "支出一覧"));
+        }, userId, pattern, pattern, PER_TYPE);
 
         List<Map<String, Object>> body = new ArrayList<>();
         if (results.isEmpty()) {
