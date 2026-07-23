@@ -32,6 +32,7 @@ public class ContextualInputFilter extends OncePerRequestFilter {
     private final BenlyCommandService commandService;
     private final TaskService taskService;
     private final AdvancedScheduleService scheduleService;
+    private final SchedulePartialEditService schedulePartialEditService;
     private final HabitService habitService;
     private final ExpenseService expenseService;
 
@@ -40,6 +41,7 @@ public class ContextualInputFilter extends OncePerRequestFilter {
                                  BenlyCommandService commandService,
                                  TaskService taskService,
                                  AdvancedScheduleService scheduleService,
+                                 SchedulePartialEditService schedulePartialEditService,
                                  HabitService habitService,
                                  ExpenseService expenseService) {
         this.webhook = webhook;
@@ -47,6 +49,7 @@ public class ContextualInputFilter extends OncePerRequestFilter {
         this.commandService = commandService;
         this.taskService = taskService;
         this.scheduleService = scheduleService;
+        this.schedulePartialEditService = schedulePartialEditService;
         this.habitService = habitService;
         this.expenseService = expenseService;
     }
@@ -135,7 +138,7 @@ public class ContextualInputFilter extends OncePerRequestFilter {
             case MEMO_EDIT -> commandService.handle(userId, "メモ編集 " + number + " " + input);
             case TASK_EDIT -> taskService.handle(userId, "タスク変更 " + number + " " + input);
             case TASK_POSTPONE -> taskService.handle(userId, "タスク延期 " + number + " " + input);
-            case SCHEDULE_EDIT -> scheduleService.handle(userId, "予定変更 " + number + " " + input);
+            case SCHEDULE_EDIT -> schedulePartialEditService.edit(userId, number, input);
             case HABIT_EDIT -> habitService.handle(userId, "習慣編集 " + number + " " + input);
             case EXPENSE_EDIT -> expenseService.handle(userId, "支出編集 " + number + " " + input);
         };
@@ -164,7 +167,7 @@ public class ContextualInputFilter extends OncePerRequestFilter {
                 FlexUi.vertical("#FCFDFE", "12px", "sm", List.of(
                         FlexUi.card("#F7F9FC", "10px", "xs", List.of(
                                 FlexUi.text(instruction, "sm", "bold", "#334E68"),
-                                FlexUi.text("次のメッセージをそのまま変更内容として使うよ", "xxs", "regular", "#718096")
+                                FlexUi.text(contextHint(type), "xxs", "regular", "#718096")
                         )),
                         FlexUi.horizontal(List.of(
                                 FlexUi.button("キャンセル", "キャンセル", "#8793A5"),
@@ -232,10 +235,16 @@ public class ContextualInputFilter extends OncePerRequestFilter {
             case MEMO_EDIT -> "新しいメモ内容を送ってね";
             case TASK_EDIT -> "新しい内容・期限・優先度を送ってね";
             case TASK_POSTPONE -> "延期先を送ってね（例：明日、1時間後）";
-            case SCHEDULE_EDIT -> "新しい日時と内容を送ってね（例：2026-08-01 20:00 会議）";
+            case SCHEDULE_EDIT -> "変更したい部分だけ送ってね（例：遊園地 / 17:30 / 7/30 / きょう17:30 遊園地）";
             case HABIT_EDIT -> "新しい習慣内容・曜日・通知時刻を送ってね";
             case EXPENSE_EDIT -> "新しい金額と内容を送ってね";
         };
+    }
+
+    private String contextHint(PendingInputContext.Type type) {
+        return type == PendingInputContext.Type.SCHEDULE_EDIT
+                ? "内容だけ・時刻だけ・日付だけでも、その部分だけ変更するよ"
+                : "次のメッセージをそのまま変更内容として使うよ";
     }
 
     private String listCommand(PendingInputContext.Type type) {
