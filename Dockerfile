@@ -1,9 +1,9 @@
 FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /app
 COPY pom.xml .
-RUN mvn -B -DskipTests dependency:go-offline
+RUN mvn -B -Dmaven.test.skip=true dependency:go-offline
 COPY src src
-RUN sh -c 'mvn -B -DskipTests package > /tmp/maven-build.log 2>&1 || { echo "===== MAVEN BUILD ERROR (last 200 lines) ====="; tail -n 200 /tmp/maven-build.log; exit 1; }'
+RUN sh -c 'mvn -B -Dmaven.test.skip=true package > /tmp/maven-build.log 2>&1 || { echo "===== MAVEN BUILD ERROR (last 200 lines) ====="; tail -n 200 /tmp/maven-build.log; exit 1; }'
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
