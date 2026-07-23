@@ -1,32 +1,15 @@
 package jp.ryozora.lineassistant;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.ReadListener;
-import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,24 +27,20 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
             "自分のデータ", "統計", "今日のミッション", "今週ランキング"
     );
 
-    private final ObjectMapper mapper;
-    private final LineProperties props;
+    private final LineWebhookSupport webhook;
     private final WeatherCommandService weatherCommandService;
     private final ExpenseService expenseService;
     private final HabitService habitService;
     private final RpgService rpgService;
     private final BenlyCommandService commandService;
-    private final HttpClient client = HttpClient.newHttpClient();
 
-    public UnifiedResultUiFilter(ObjectMapper mapper,
-                                 LineProperties props,
+    public UnifiedResultUiFilter(LineWebhookSupport webhook,
                                  WeatherCommandService weatherCommandService,
                                  ExpenseService expenseService,
                                  HabitService habitService,
                                  RpgService rpgService,
                                  BenlyCommandService commandService) {
-        this.mapper = mapper;
-        this.props = props;
+        this.webhook = webhook;
         this.weatherCommandService = weatherCommandService;
         this.expenseService = expenseService;
         this.habitService = habitService;
@@ -79,35 +58,27 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws IOException {
         byte[] body = request.getInputStream().readAllBytes();
-        CachedRequest wrapped = new CachedRequest(request, body);
+        CachedBodyRequest wrapped = new CachedBodyRequest(request, body);
 
         try {
-            JsonNode root = mapper.readTree(body);
-            for (JsonNode event : root.path("events")) {
-                if (!"message".equals(event.path("type").asText())) continue;
-                if (!"text".equals(event.path("message").path("type").asText())) continue;
-
-                String input = normalize(event.path("message").path("text").asText());
+            for (LineWebhookSupport.TextEvent event : webhook.textEvents(body)) {
+                String input = event.text();
                 if (!COMMANDS.contains(input)) continue;
-                if (!validSignature(body, request.getHeader("x-line-signature"))) {
+                if (!webhook.isAuthorized(body, request.getHeader("x-line-signature"), event.userId())) {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                     return;
                 }
 
-                String userId = event.path("source").path("userId").asText();
-                if (!allowed(userId)) {
-                    response.setStatus(HttpServletResponse.SC_OK);
-                    return;
-                }
-
-                String result = resultFor(userId, input);
+                String result = resultFor(event.userId(), input);
                 if (result == null || result.startsWith("受け取ったよ：")) continue;
 
                 Style style = styleFor(input);
                 Map<String, Object> bubble = weatherCommandService.isWeatherCommand(input)
                         ? weatherBubble(style, result)
                         : resultBubble(style, result);
-                replyFlex(event.path("replyToken").asText(), style.title(), bubble, quickReply(style));
+                Map<String, Object> flex = new LinkedHashMap<>(FlexUi.flexMessage(style.title(), bubble));
+                flex.put("quickReply", quickReply(style));
+                webhook.reply(event.replyToken(), List.of(flex));
                 response.setStatus(HttpServletResponse.SC_OK);
                 return;
             }
@@ -165,13 +136,9 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
         String source = valueAfter(lines, "取得元：", "Open-Meteo");
         String updated = valueAfter(lines, "取得時刻：", "");
 
-        Map<String, Object> bubble = new LinkedHashMap<>();
-        bubble.put("type", "bubble");
-        bubble.put("size", "mega");
-        bubble.put("header", vertical(style.headerBackground(), "12px", "sm", List.of(
-                text(title, "xl", "bold", style.accent(), "start"),
-                text(area.isBlank() ? "" : area, "xs", "regular", "#617184", "start")
-        ).stream().filter(c -> !"".equals(c.get("text"))).toList()));
+        List<Map<String, Object>> headerItems = new ArrayList<>();
+        headerItems.add(text(title, "xl", "bold", style.accent(), "start"));
+        if (!area.isBlank()) headerItems.add(text(area, "xs", "regular", "#617184", "start"));
 
         List<Map<String, Object>> contents = new ArrayList<>();
         List<Map<String, Object>> main = new ArrayList<>();
@@ -184,55 +151,26 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
         if (!rainTiming.isBlank()) rain.add(text(rainTiming, "md", "bold", "#2E6FC4", "start"));
         if (!rainProbability.isBlank()) rain.add(text(rainProbability, "sm", "regular", "#526D82", "start"));
         if (!rain.isEmpty()) contents.add(groupBox("#EEF6FF", rain));
+        if (!advice.isBlank()) contents.add(groupBox("#FFF8E8", List.of(
+                text(advice, "sm", "bold", "#72551E", "start")
+        )));
 
-        if (!advice.isBlank()) {
-            contents.add(groupBox("#FFF8E8", List.of(text(advice, "sm", "bold", "#72551E", "start"))));
-        }
-
-        String meta = "取得元：" + source + (updated.isBlank() ? "" : "　更新：" + updated);
-        contents.add(text(meta, "xxs", "regular", "#8A96A6", "start"));
+        contents.add(text("取得元：" + source + (updated.isBlank() ? "" : "　更新：" + updated),
+                "xxs", "regular", "#8A96A6", "start"));
         contents.add(horizontal(List.of(
                 button("関連", style.backMessage(), style.accent()),
                 button("🏠 ホーム", "ホーム", "#8592A6")
         )));
-        bubble.put("body", vertical("#FCFDFE", "12px", "sm", contents));
-        return bubble;
-    }
 
-    private String firstMatching(List<String> lines, java.util.function.Predicate<String> predicate, String fallback) {
-        return lines.stream().filter(predicate).findFirst().orElse(fallback);
-    }
-
-    private String valueAfter(List<String> lines, String prefix, String fallback) {
-        return lines.stream().filter(v -> v.startsWith(prefix)).findFirst()
-                .map(v -> v.substring(prefix.length()).strip()).orElse(fallback);
-    }
-
-    private Map<String, Object> groupBox(String background, List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "vertical");
-        box.put("backgroundColor", background);
-        box.put("cornerRadius", "12px");
-        box.put("paddingAll", "12px");
-        box.put("spacing", "xs");
-        box.put("contents", contents.isEmpty()
-                ? List.of(text("情報を取得できなかったよ", "sm", "regular", "#526D82", "start"))
-                : contents);
-        return box;
+        return FlexUi.bubble(
+                vertical(style.headerBackground(), "12px", "sm", headerItems),
+                vertical("#FCFDFE", "12px", "sm", contents)
+        );
     }
 
     private Map<String, Object> resultBubble(Style style, String raw) {
-        Map<String, Object> bubble = new LinkedHashMap<>();
-        bubble.put("type", "bubble");
-        bubble.put("size", "mega");
-
         List<String> lines = raw.lines().map(String::stripTrailing).toList();
         String first = lines.stream().filter(v -> !v.isBlank() && !isDivider(v)).findFirst().orElse(style.title());
-        bubble.put("header", vertical(style.headerBackground(), "14px", "md", List.of(
-                text(first, "xl", "bold", style.accent(), "start"),
-                text(style.subtitle(), "xs", "regular", "#617184", "start")
-        )));
 
         List<Map<String, Object>> contents = new ArrayList<>();
         boolean skippedFirst = false;
@@ -240,7 +178,7 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
         for (String line : lines) {
             String value = line.strip();
             if (value.isBlank()) {
-                if (!contents.isEmpty()) contents.add(separator());
+                if (!contents.isEmpty()) contents.add(FlexUi.separator());
                 continue;
             }
             if (!skippedFirst && value.equals(first)) {
@@ -248,7 +186,7 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
                 continue;
             }
             if (isDivider(value)) {
-                if (!contents.isEmpty()) contents.add(separator());
+                if (!contents.isEmpty()) contents.add(FlexUi.separator());
                 continue;
             }
             if (visible >= 35) {
@@ -261,149 +199,70 @@ public class UnifiedResultUiFilter extends OncePerRequestFilter {
         if (contents.isEmpty()) contents.add(text("表示できる情報はまだないよ", "md", "regular", "#526D82", "center"));
         contents.add(button("関連メニュー", style.backMessage(), style.accent()));
         contents.add(button("🏠 ホーム", "ホーム", "#8592A6"));
-        bubble.put("body", vertical("#FCFDFE", "16px", "md", contents));
-        return bubble;
+
+        return FlexUi.bubble(
+                vertical(style.headerBackground(), "14px", "md", List.of(
+                        text(first, "xl", "bold", style.accent(), "start"),
+                        text(style.subtitle(), "xs", "regular", "#617184", "start")
+                )),
+                vertical("#FCFDFE", "16px", "md", contents)
+        );
     }
 
     private Map<String, Object> lineCard(String value) {
-        String color = value.contains("期限切れ") || value.contains("削除") || value.contains("注意") ? "#B54752" : "#334E68";
+        String color = value.contains("期限切れ") || value.contains("削除") || value.contains("注意")
+                ? "#B54752" : "#334E68";
         String weight = value.startsWith("【") || value.startsWith("■") || value.startsWith("□")
                 || value.matches("^\\d+[.．].*") ? "bold" : "regular";
         return groupBox("#F5F8FC", List.of(text(value, "sm", weight, color, "start")));
     }
 
+    private Map<String, Object> groupBox(String background, List<Map<String, Object>> contents) {
+        return FlexUi.card(background, "12px", "xs", contents.isEmpty()
+                ? List.of(text("情報を取得できなかったよ", "sm", "regular", "#526D82", "start"))
+                : contents);
+    }
+
     private Map<String, Object> quickReply(Style style) {
         return Map.of("items", List.of(
-                quick("🏠 ホーム", "ホーム"),
-                quick("関連メニュー", style.backMessage()),
-                quick("操作メニュー", "操作メニュー")
+                FlexUi.quick("🏠 ホーム", "ホーム"),
+                FlexUi.quick("関連メニュー", style.backMessage()),
+                FlexUi.quick("操作メニュー", "操作メニュー")
         ));
     }
 
     private Map<String, Object> vertical(String background, String padding, String spacing,
                                          List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "vertical");
-        box.put("backgroundColor", background);
-        box.put("paddingAll", padding);
-        box.put("spacing", spacing);
-        box.put("contents", contents);
-        return box;
+        return FlexUi.vertical(background, padding, spacing, contents);
     }
 
     private Map<String, Object> horizontal(List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "horizontal");
-        box.put("spacing", "sm");
-        box.put("contents", contents);
-        return box;
+        return FlexUi.horizontal(contents);
     }
 
     private Map<String, Object> text(String value, String size, String weight, String color, String align) {
-        Map<String, Object> text = new LinkedHashMap<>();
-        text.put("type", "text");
-        text.put("text", value);
-        text.put("size", size);
-        text.put("weight", weight);
-        text.put("color", color);
-        text.put("align", align);
-        text.put("wrap", true);
-        return text;
+        return FlexUi.text(value, size, weight, color, align);
     }
 
     private Map<String, Object> button(String label, String message, String color) {
-        Map<String, Object> button = new LinkedHashMap<>();
-        button.put("type", "button");
-        button.put("style", "primary");
-        button.put("height", "sm");
-        button.put("color", color);
+        Map<String, Object> button = new LinkedHashMap<>(FlexUi.button(label, message, color));
         button.put("flex", 1);
-        button.put("adjustMode", "shrink-to-fit");
-        button.put("action", Map.of("type", "message", "label", label, "text", message));
         return button;
     }
 
-    private Map<String, Object> separator() {
-        return Map.of("type", "separator", "color", "#E2E8F0", "margin", "sm");
+    private String firstMatching(List<String> lines, java.util.function.Predicate<String> predicate, String fallback) {
+        return lines.stream().filter(predicate).findFirst().orElse(fallback);
     }
 
-    private Map<String, Object> quick(String label, String message) {
-        return Map.of("type", "action", "action", Map.of("type", "message", "label", label, "text", message));
-    }
-
-    private void replyFlex(String replyToken, String altText, Map<String, Object> bubble,
-                           Map<String, Object> quickReply) throws Exception {
-        Map<String, Object> flex = new LinkedHashMap<>();
-        flex.put("type", "flex");
-        flex.put("altText", altText);
-        flex.put("contents", bubble);
-        flex.put("quickReply", quickReply);
-        sendReply(replyToken, List.of(flex));
-    }
-
-    private void sendReply(String replyToken, List<Map<String, Object>> messages) throws Exception {
-        String json = mapper.writeValueAsString(Map.of("replyToken", replyToken, "messages", messages));
-        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.line.me/v2/bot/message/reply"))
-                .header("Authorization", "Bearer " + props.channelAccessToken())
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
-                .build();
-        HttpResponse<Void> result = client.send(request, HttpResponse.BodyHandlers.discarding());
-        if (result.statusCode() / 100 != 2) throw new IllegalStateException("LINE API error: HTTP " + result.statusCode());
+    private String valueAfter(List<String> lines, String prefix, String fallback) {
+        return lines.stream().filter(v -> v.startsWith(prefix)).findFirst()
+                .map(v -> v.substring(prefix.length()).strip()).orElse(fallback);
     }
 
     private boolean isDivider(String value) {
         return value.matches("^[━─ー_=\\-]{3,}$");
     }
 
-    private boolean allowed(String userId) {
-        return props.ownerUserId() == null || props.ownerUserId().isBlank() || props.ownerUserId().equals(userId);
-    }
-
-    private boolean validSignature(byte[] body, String received) {
-        if (received == null || props.channelSecret() == null || props.channelSecret().isBlank()) return false;
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(props.channelSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String expected = Base64.getEncoder().encodeToString(mac.doFinal(body));
-            return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), received.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private String normalize(String value) {
-        return value == null ? "" : value.replace('　', ' ').replaceAll("[\\t\\n\\r ]+", " ").strip();
-    }
-
     private record Style(String title, String subtitle, String accent,
                          String headerBackground, String backMessage) {}
-
-    private static final class CachedRequest extends HttpServletRequestWrapper {
-        private final byte[] body;
-
-        private CachedRequest(HttpServletRequest request, byte[] body) {
-            super(request);
-            this.body = body;
-        }
-
-        @Override
-        public ServletInputStream getInputStream() {
-            ByteArrayInputStream input = new ByteArrayInputStream(body);
-            return new ServletInputStream() {
-                @Override public boolean isFinished() { return input.available() == 0; }
-                @Override public boolean isReady() { return true; }
-                @Override public void setReadListener(ReadListener listener) { }
-                @Override public int read() { return input.read(); }
-                @Override public int read(byte[] b, int off, int len) { return input.read(b, off, len); }
-            };
-        }
-
-        @Override
-        public BufferedReader getReader() {
-            return new BufferedReader(new InputStreamReader(getInputStream(), StandardCharsets.UTF_8));
-        }
-    }
 }
