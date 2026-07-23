@@ -3,7 +3,7 @@ WORKDIR /app
 COPY pom.xml .
 RUN mvn -B -DskipTests dependency:go-offline
 COPY src src
-RUN mvn -B -DskipTests package
+RUN sh -c 'mvn -B -DskipTests package > /tmp/maven-build.log 2>&1 || { echo "===== MAVEN BUILD ERROR (last 200 lines) ====="; tail -n 200 /tmp/maven-build.log; exit 1; }'
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
