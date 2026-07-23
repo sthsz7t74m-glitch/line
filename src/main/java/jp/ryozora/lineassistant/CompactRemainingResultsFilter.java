@@ -1,36 +1,21 @@
 package jp.ryozora.lineassistant;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.ReadListener;
-import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static jp.ryozora.lineassistant.FlexUi.*;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 38)
@@ -43,24 +28,20 @@ public class CompactRemainingResultsFilter extends OncePerRequestFilter {
             "自分のデータ", "統計", "買い物一覧"
     );
 
-    private final ObjectMapper mapper;
-    private final LineProperties props;
+    private final LineWebhookSupport webhook;
     private final ExpenseService expenseService;
     private final HabitService habitService;
     private final RpgService rpgService;
     private final AiSecretaryService aiSecretaryService;
     private final BenlyCommandService commandService;
-    private final HttpClient client = HttpClient.newHttpClient();
 
-    public CompactRemainingResultsFilter(ObjectMapper mapper,
-                                         LineProperties props,
+    public CompactRemainingResultsFilter(LineWebhookSupport webhook,
                                          ExpenseService expenseService,
                                          HabitService habitService,
                                          RpgService rpgService,
                                          AiSecretaryService aiSecretaryService,
                                          BenlyCommandService commandService) {
-        this.mapper = mapper;
-        this.props = props;
+        this.webhook = webhook;
         this.expenseService = expenseService;
         this.habitService = habitService;
         this.rpgService = rpgService;
@@ -78,39 +59,31 @@ public class CompactRemainingResultsFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws IOException {
         byte[] body = request.getInputStream().readAllBytes();
-        CachedRequest wrapped = new CachedRequest(request, body);
-
+        CachedBodyRequest wrapped = new CachedBodyRequest(request, body);
         try {
-            JsonNode root = mapper.readTree(body);
-            for (JsonNode event : root.path("events")) {
-                if (!"message".equals(event.path("type").asText())) continue;
-                if (!"text".equals(event.path("message").path("type").asText())) continue;
-
-                String input = normalize(event.path("message").path("text").asText());
+            for (LineWebhookSupport.TextEvent event : webhook.textEvents(body)) {
+                String input = event.text();
                 if (!COMMANDS.contains(input)) continue;
-                if (!validSignature(body, request.getHeader("x-line-signature"))) {
+                if (!webhook.isAuthorized(body, request.getHeader("x-line-signature"), event.userId())) {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                     return;
                 }
-
-                String userId = event.path("source").path("userId").asText();
-                if (!allowed(userId)) {
-                    response.setStatus(HttpServletResponse.SC_OK);
-                    return;
-                }
-
-                String result = resultFor(userId, input);
+                String result = resultFor(event.userId(), input);
                 if (result == null || result.startsWith("受け取ったよ：")) continue;
-
                 Style style = styleFor(input);
-                replyFlex(event.path("replyToken").asText(), style.title(), bubble(style, result));
+                Map<String, Object> flex = new LinkedHashMap<>(flexMessage(style.title(), resultBubble(style, result)));
+                flex.put("quickReply", Map.of("items", List.of(
+                        quick("🏠 ホーム", "ホーム"),
+                        quick("関連", style.backMessage()),
+                        quick("操作メニュー", "操作メニュー")
+                )));
+                webhook.reply(event.replyToken(), List.of(flex));
                 response.setStatus(HttpServletResponse.SC_OK);
                 return;
             }
         } catch (Exception ignored) {
             // Existing webhook processing remains the fallback.
         }
-
         try {
             chain.doFilter(wrapped, response);
         } catch (Exception e) {
@@ -147,70 +120,55 @@ public class CompactRemainingResultsFilter extends OncePerRequestFilter {
         return new Style("ベンリー", "#526D82", "#F1F5F9", "ホーム");
     }
 
-    private Map<String, Object> bubble(Style style, String raw) {
+    private Map<String, Object> resultBubble(Style style, String raw) {
         List<String> lines = cleanLines(raw);
         String title = lines.isEmpty() ? style.title() : lines.get(0);
         List<String> contentLines = lines.size() <= 1 ? List.of() : lines.subList(1, lines.size());
-
         List<String> primary = new ArrayList<>();
         List<String> details = new ArrayList<>();
         List<String> meta = new ArrayList<>();
 
         for (String line : contentLines) {
-            if (isInstruction(line)) {
-                meta.add(line);
-            } else if (isPrimary(line) && primary.size() < 4) {
-                primary.add(line);
-            } else if (details.size() < 12) {
-                details.add(line);
-            }
+            if (isInstruction(line)) meta.add(line);
+            else if (isPrimary(line) && primary.size() < 4) primary.add(line);
+            else if (details.size() < 12) details.add(line);
         }
-
-        Map<String, Object> bubble = new LinkedHashMap<>();
-        bubble.put("type", "bubble");
-        bubble.put("size", "mega");
-        bubble.put("header", vertical(style.headerColor(), "12px", "xs", List.of(
-                text(title, "xl", "bold", style.accent()),
-                text(style.title(), "xxs", "regular", "#6A788B")
-        )));
 
         List<Map<String, Object>> body = new ArrayList<>();
         if (!primary.isEmpty()) {
             List<Map<String, Object>> main = new ArrayList<>();
             for (int i = 0; i < primary.size(); i++) {
-                String size = i == 0 ? "lg" : "sm";
-                String weight = i == 0 ? "bold" : "regular";
-                main.add(text(primary.get(i), size, weight, i == 0 ? "#243B53" : "#526D82"));
+                main.add(text(primary.get(i), i == 0 ? "lg" : "sm", i == 0 ? "bold" : "regular",
+                        i == 0 ? "#243B53" : "#526D82"));
             }
-            body.add(groupBox(tint(style.headerColor()), "12px", main));
+            body.add(card(tint(style.headerColor()), "12px", "xs", main));
         }
-
         if (!details.isEmpty()) {
-            List<Map<String, Object>> detailComponents = new ArrayList<>();
-            int shown = 0;
-            for (String line : details) {
-                if (shown >= 10) break;
+            List<Map<String, Object>> components = new ArrayList<>();
+            for (String line : details.stream().limit(10).toList()) {
                 boolean warning = line.contains("期限切れ") || line.contains("注意") || line.contains("未達成");
                 boolean strong = line.startsWith("【") || line.startsWith("■") || line.startsWith("□")
                         || line.matches("^\\d+[.．].*");
-                detailComponents.add(text(line, "xs", strong ? "bold" : "regular",
+                components.add(text(line, "xs", strong ? "bold" : "regular",
                         warning ? "#B54752" : "#526D82"));
-                shown++;
             }
-            body.add(groupBox("#F6F8FB", "10px", detailComponents));
+            body.add(card("#F6F8FB", "10px", "xs", components));
         }
-
         if (!meta.isEmpty()) {
-            body.add(text(String.join("　", meta.stream().limit(2).toList()),
-                    "xxs", "regular", "#8A96A6"));
+            body.add(text(String.join("　", meta.stream().limit(2).toList()), "xxs", "regular", "#8A96A6"));
         }
-
+        if (body.isEmpty()) body.add(text("表示できる情報はまだないよ", "sm", "regular", "#526D82"));
         body.add(horizontal(List.of(
                 button("関連", style.backMessage(), style.accent()),
                 button("🏠 ホーム", "ホーム", "#8592A6")
         )));
-        bubble.put("body", vertical("#FCFDFE", "12px", "sm", body));
-        return bubble;
+        return bubble(
+                vertical(style.headerColor(), "12px", "xs", List.of(
+                        text(title, "xl", "bold", style.accent()),
+                        text(style.title(), "xxs", "regular", "#6A788B")
+                )),
+                vertical("#FCFDFE", "12px", "sm", body)
+        );
     }
 
     private boolean isPrimary(String line) {
@@ -226,7 +184,7 @@ public class CompactRemainingResultsFilter extends OncePerRequestFilter {
     }
 
     private List<String> cleanLines(String raw) {
-        return raw.lines().map(String::strip)
+        return raw == null ? List.of() : raw.lines().map(String::strip)
                 .filter(v -> !v.isBlank())
                 .filter(v -> !v.matches("^[━─ー_=\\-]{3,}$"))
                 .toList();
@@ -243,140 +201,5 @@ public class CompactRemainingResultsFilter extends OncePerRequestFilter {
         };
     }
 
-    private Map<String, Object> groupBox(String background, String padding, List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "vertical");
-        box.put("backgroundColor", background);
-        box.put("cornerRadius", "12px");
-        box.put("paddingAll", padding);
-        box.put("spacing", "xs");
-        box.put("contents", contents.isEmpty()
-                ? List.of(text("表示できる情報はまだないよ", "sm", "regular", "#526D82"))
-                : contents);
-        return box;
-    }
-
-    private Map<String, Object> vertical(String background, String padding, String spacing,
-                                         List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "vertical");
-        box.put("backgroundColor", background);
-        box.put("paddingAll", padding);
-        box.put("spacing", spacing);
-        box.put("contents", contents);
-        return box;
-    }
-
-    private Map<String, Object> horizontal(List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "horizontal");
-        box.put("spacing", "sm");
-        box.put("contents", contents);
-        return box;
-    }
-
-    private Map<String, Object> text(String value, String size, String weight, String color) {
-        Map<String, Object> text = new LinkedHashMap<>();
-        text.put("type", "text");
-        text.put("text", value);
-        text.put("size", size);
-        text.put("weight", weight);
-        text.put("color", color);
-        text.put("wrap", true);
-        return text;
-    }
-
-    private Map<String, Object> button(String label, String message, String color) {
-        Map<String, Object> button = new LinkedHashMap<>();
-        button.put("type", "button");
-        button.put("style", "primary");
-        button.put("height", "sm");
-        button.put("color", color);
-        button.put("flex", 1);
-        button.put("adjustMode", "shrink-to-fit");
-        button.put("action", Map.of("type", "message", "label", label, "text", message));
-        return button;
-    }
-
-    private void replyFlex(String replyToken, String altText, Map<String, Object> bubble) throws Exception {
-        Map<String, Object> message = new LinkedHashMap<>();
-        message.put("type", "flex");
-        message.put("altText", altText);
-        message.put("contents", bubble);
-        message.put("quickReply", Map.of("items", List.of(
-                quick("🏠 ホーム", "ホーム"),
-                quick("操作メニュー", "操作メニュー")
-        )));
-        sendReply(replyToken, List.of(message));
-    }
-
-    private Map<String, Object> quick(String label, String message) {
-        return Map.of("type", "action", "action", Map.of(
-                "type", "message", "label", label, "text", message
-        ));
-    }
-
-    private void sendReply(String replyToken, List<Map<String, Object>> messages) throws Exception {
-        String json = mapper.writeValueAsString(Map.of("replyToken", replyToken, "messages", messages));
-        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.line.me/v2/bot/message/reply"))
-                .header("Authorization", "Bearer " + props.channelAccessToken())
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
-                .build();
-        HttpResponse<Void> result = client.send(request, HttpResponse.BodyHandlers.discarding());
-        if (result.statusCode() / 100 != 2) {
-            throw new IllegalStateException("LINE API error: HTTP " + result.statusCode());
-        }
-    }
-
-    private boolean allowed(String userId) {
-        return props.ownerUserId() == null || props.ownerUserId().isBlank() || props.ownerUserId().equals(userId);
-    }
-
-    private boolean validSignature(byte[] body, String received) {
-        if (received == null || props.channelSecret() == null || props.channelSecret().isBlank()) return false;
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(props.channelSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String expected = Base64.getEncoder().encodeToString(mac.doFinal(body));
-            return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), received.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private String normalize(String value) {
-        return value == null ? "" : value.replace('　', ' ').replaceAll("[\\t\\n\\r ]+", " ").strip();
-    }
-
-    private record Style(String title, String accent, String headerColor, String backMessage) {}
-
-    private static final class CachedRequest extends HttpServletRequestWrapper {
-        private final byte[] body;
-
-        private CachedRequest(HttpServletRequest request, byte[] body) {
-            super(request);
-            this.body = body;
-        }
-
-        @Override
-        public ServletInputStream getInputStream() {
-            ByteArrayInputStream input = new ByteArrayInputStream(body);
-            return new ServletInputStream() {
-                @Override public boolean isFinished() { return input.available() == 0; }
-                @Override public boolean isReady() { return true; }
-                @Override public void setReadListener(ReadListener listener) { }
-                @Override public int read() { return input.read(); }
-                @Override public int read(byte[] b, int off, int len) { return input.read(b, off, len); }
-            };
-        }
-
-        @Override
-        public BufferedReader getReader() {
-            return new BufferedReader(new InputStreamReader(getInputStream(), StandardCharsets.UTF_8));
-        }
-    }
+    private record Style(String title, String accent, String headerColor, String backMessage) { }
 }
