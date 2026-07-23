@@ -67,14 +67,8 @@ public class NotificationScheduler {
                 WeatherService.Forecast forecast = weather.fetch(settings.latitude(), settings.longitude());
                 if (!forecast.rainSoon()) continue;
                 String time = forecast.rainAt().format(DateTimeFormatter.ofPattern("H時"));
-                String message = "雨のお知らせ\n"
-                        + "対象地域：" + settings.area() + "\n"
-                        + "予報：" + time + "ごろから雨の可能性\n"
-                        + "降水確率：" + forecast.rainProbability() + "%\n"
-                        + "傘を忘れずに！\n\n"
-                        + "取得元：" + WEATHER_SOURCE + "\n"
-                        + "取得時刻：" + now.format(DateTimeFormatter.ofPattern("M/d H:mm"));
-                push.push(userId, message);
+                push.pushRainAlert(userId, settings.area(), time, forecast.rainProbability(),
+                        WEATHER_SOURCE, now);
                 store.markRain(userId, now);
             } catch (RuntimeException ignored) {
                 // Keep scheduled jobs alive without exposing personal data.
@@ -173,10 +167,8 @@ public class NotificationScheduler {
                 if (!p.night().equals(now.toLocalTime())) continue;
                 if (!preferences.isAllowedNow(userId, now.toLocalTime())) continue;
                 NotificationDataStore.NightSummary summary = dataStore.nightSummary(userId, today, OFFSET);
-                push.push(userId, "今日もお疲れさま！\n"
-                        + "完了タスク " + summary.completedTasks() + "件\n"
-                        + "経験値 +" + summary.gainedExperience() + "\n"
-                        + "明日の予定 " + summary.tomorrowSchedules() + "件");
+                push.pushNightSummary(userId, summary.completedTasks(), summary.gainedExperience(),
+                        summary.tomorrowSchedules());
                 dataStore.markNight(userId, today);
             } catch (RuntimeException ignored) {
                 // Keep personal summaries out of logs.
