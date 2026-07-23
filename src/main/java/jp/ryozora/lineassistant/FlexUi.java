@@ -8,12 +8,17 @@ public final class FlexUi {
     private FlexUi() {}
 
     public static Map<String, Object> text(String value, String size, String weight, String color) {
+        return text(value, size, weight, color, null);
+    }
+
+    public static Map<String, Object> text(String value, String size, String weight, String color, String align) {
         Map<String, Object> text = new LinkedHashMap<>();
         text.put("type", "text");
         text.put("text", value);
         text.put("size", size);
         text.put("weight", weight);
         text.put("color", color);
+        if (align != null && !align.isBlank()) text.put("align", align);
         text.put("wrap", true);
         return text;
     }
@@ -48,6 +53,23 @@ public final class FlexUi {
         box.put("spacing", "sm");
         box.put("contents", contents);
         return box;
+    }
+
+    public static Map<String, Object> card(String background, String padding, String spacing,
+                                           List<Map<String, Object>> contents) {
+        Map<String, Object> card = new LinkedHashMap<>(vertical(background, padding, spacing, contents));
+        card.put("cornerRadius", "12px");
+        return card;
+    }
+
+    public static Map<String, Object> separator() {
+        return Map.of("type", "separator", "color", "#E2E8F0", "margin", "sm");
+    }
+
+    public static Map<String, Object> quick(String label, String message) {
+        return Map.of("type", "action", "action", Map.of(
+                "type", "message", "label", label, "text", message
+        ));
     }
 
     public static Map<String, Object> bubble(Map<String, Object> header, Map<String, Object> body) {
