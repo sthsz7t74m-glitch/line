@@ -29,10 +29,13 @@ public class ScheduleManagementFilter extends OncePerRequestFilter {
 
     private final JdbcTemplate jdbc;
     private final LineWebhookSupport line;
+    private final PendingInputContext inputContext;
 
-    public ScheduleManagementFilter(JdbcTemplate jdbc, LineWebhookSupport line) {
+    public ScheduleManagementFilter(JdbcTemplate jdbc, LineWebhookSupport line,
+                                    PendingInputContext inputContext) {
         this.jdbc = jdbc;
         this.line = line;
+        this.inputContext = inputContext;
     }
 
     @Override
@@ -106,6 +109,7 @@ public class ScheduleManagementFilter extends OncePerRequestFilter {
         }
 
         if (input.startsWith("予定変更案内 ")) {
+            inputContext.start(userId, PendingInputContext.Type.SCHEDULE_EDIT, number);
             replyFlex(replyToken, "予定の変更", changeGuideBubble(number, row));
             return;
         }
@@ -198,13 +202,20 @@ public class ScheduleManagementFilter extends OncePerRequestFilter {
         return FlexUi.bubble(
                 FlexUi.vertical("#DDEBFF", "16px", "md", List.of(
                         FlexUi.text("予定を変更", "xl", "bold", "#2E6FC4"),
-                        FlexUi.text(row.title(), "md", "regular", "#526D82")
+                        FlexUi.text(row.title(), "md", "regular", "#526D82"),
+                        FlexUi.text("対象 No." + number + "・入力待ち中", "xxs", "regular", "#718096")
                 )),
                 FlexUi.vertical("#FAFCFF", "16px", "md", List.of(
-                        FlexUi.text("変更内容をそのまま送ってね", "md", "bold", "#334E68"),
-                        FlexUi.text("例：予定変更 " + number + " 2026-08-01 20:00 会議", "sm", "regular", "#526D82"),
-                        FlexUi.button("入力を始める", "予定変更 " + number + " ", "#6CA6E5"),
-                        FlexUi.button("予定一覧へ戻る", "予定一覧", "#8E9CB3")
+                        FlexUi.text("次のメッセージをそのまま送ってね", "md", "bold", "#334E68"),
+                        FlexUi.text("内容だけ：ブランコ", "sm", "regular", "#526D82"),
+                        FlexUi.text("時刻だけ：17:30", "sm", "regular", "#526D82"),
+                        FlexUi.text("日付だけ：明日 / 7/30", "sm", "regular", "#526D82"),
+                        FlexUi.text("複数指定：明日17:30 ブランコ", "sm", "regular", "#526D82"),
+                        FlexUi.text("書かなかった項目はそのまま残すよ", "xxs", "regular", "#718096"),
+                        FlexUi.horizontal(List.of(
+                                FlexUi.button("キャンセル", "キャンセル", "#8E9CB3"),
+                                FlexUi.button("予定一覧", "予定一覧", "#6CA6E5")
+                        ))
                 ))
         );
     }
