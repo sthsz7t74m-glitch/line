@@ -19,17 +19,20 @@ import java.util.Map;
 public class LinePushService {
     private final LineProperties props;
     private final ObjectMapper mapper;
+    private final NotificationHistoryStore history;
     private final HttpClient client = HttpClient.newHttpClient();
 
-    public LinePushService(LineProperties props, ObjectMapper mapper) {
+    public LinePushService(LineProperties props, ObjectMapper mapper, NotificationHistoryStore history) {
         this.props = props;
         this.mapper = mapper;
+        this.history = history;
     }
 
     public void push(String userId, String text) {
         if (userId == null || userId.isBlank() || text == null || text.isBlank()) return;
         String safe = text.length() > 5000 ? text.substring(0, 5000) : text;
         send(userId, Map.of("type", "text", "text", safe));
+        history.add(userId, "通知", firstLine(safe));
     }
 
     public void pushMorningBriefing(String userId, AiSecretaryService.MorningBriefing briefing) {
@@ -79,6 +82,8 @@ public class LinePushService {
         flex.put("altText", "おはよう！今日の予定と天気をまとめたよ");
         flex.put("contents", bubble);
         send(userId, flex);
+        history.add(userId, "朝のまとめ", "予定" + briefing.schedules().size() + "件・タスク"
+                + briefing.tasks().size() + "件・買い物" + briefing.shopping().size() + "件");
     }
 
     public void pushRainAlert(String userId, String area, String rainTime, int probability,
@@ -113,6 +118,7 @@ public class LinePushService {
         flex.put("altText", "雨のお知らせ：" + area + "で" + rainTime + "ごろから雨の可能性");
         flex.put("contents", bubble);
         send(userId, flex);
+        history.add(userId, "雨", area + " / " + rainTime + "ごろ / 降水確率" + probability + "%");
     }
 
     public void pushNightSummary(String userId, int completedTasks, int gainedExperience, int tomorrowSchedules) {
@@ -145,10 +151,12 @@ public class LinePushService {
         flex.put("altText", "今日のまとめ：完了タスク" + completedTasks + "件、経験値+" + gainedExperience);
         flex.put("contents", bubble);
         send(userId, flex);
+        history.add(userId, "夜のまとめ", "完了タスク" + completedTasks + "件・経験値+"
+                + gainedExperience + "・明日の予定" + tomorrowSchedules + "件");
     }
 
     public void pushScheduleReminder(String userId, long scheduleId, String title,
-                                      OffsetDateTime startsAt, int minutesBefore) {
+                                     OffsetDateTime startsAt, int minutesBefore) {
         String timing = reminderTiming(minutesBefore, false);
         Map<String, Object> bubble = new LinkedHashMap<>();
         bubble.put("type", "bubble");
@@ -175,6 +183,7 @@ public class LinePushService {
         flex.put("altText", "予定のお知らせ：" + title + "（" + timing + "）");
         flex.put("contents", bubble);
         send(userId, flex);
+        history.add(userId, "予定", title + " / " + startsAt.format(DateTimeFormatter.ofPattern("M/d H:mm")) + " / " + timing);
     }
 
     public void pushTaskReminder(String userId, long taskId, String title, String priority,
@@ -210,6 +219,7 @@ public class LinePushService {
         flex.put("altText", "タスクのお知らせ：" + title + "（" + timing + "）");
         flex.put("contents", bubble);
         send(userId, flex);
+        history.add(userId, "タスク", title + " / " + dueAt.format(DateTimeFormatter.ofPattern("M/d H:mm")) + " / " + timing);
     }
 
     public void pushHabitReminder(String userId, long habitId, String name) {
@@ -232,6 +242,7 @@ public class LinePushService {
         flex.put("altText", "習慣のお知らせ：" + name);
         flex.put("contents", bubble);
         send(userId, flex);
+        history.add(userId, "習慣", name);
     }
 
     private String reminderTiming(int minutesBefore, boolean task) {
@@ -241,6 +252,11 @@ public class LinePushService {
         if (minutesBefore % (24 * 60) == 0) return (minutesBefore / (24 * 60)) + "日前のお知らせ";
         if (minutesBefore % 60 == 0) return (minutesBefore / 60) + "時間前のお知らせ";
         return minutesBefore + "分前のお知らせ";
+    }
+
+    private String firstLine(String value) {
+        int newline = value.indexOf('\n');
+        return newline < 0 ? value : value.substring(0, newline);
     }
 
     private void send(String userId, Map<String, Object> message) {
