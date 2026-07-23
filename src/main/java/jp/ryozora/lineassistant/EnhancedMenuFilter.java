@@ -1,30 +1,16 @@
 package jp.ryozora.lineassistant;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.Base64;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,13 +27,16 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
             "成長メニュー", "習慣メニュー", "習慣・成長", "習慣と成長", "成長"
     );
 
-    private final ObjectMapper mapper;
-    private final LineProperties props;
-    private final HttpClient client = HttpClient.newHttpClient();
+    private static final String BLUE = "#4F7FC7";
+    private static final String GREEN = "#4F9F8A";
+    private static final String ORANGE = "#C68A2B";
+    private static final String PURPLE = "#7656B8";
+    private static final String GRAY = "#8793A5";
 
-    public EnhancedMenuFilter(ObjectMapper mapper, LineProperties props) {
-        this.mapper = mapper;
-        this.props = props;
+    private final LineWebhookSupport webhook;
+
+    public EnhancedMenuFilter(LineWebhookSupport webhook) {
+        this.webhook = webhook;
     }
 
     @Override
@@ -58,37 +47,25 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
+                                    FilterChain chain) throws ServletException, IOException {
         byte[] body = request.getInputStream().readAllBytes();
-        String signature = request.getHeader("x-line-signature");
-        BodyRequest wrapped = new BodyRequest(request, body);
-
-        if (!validSignature(body, signature)) {
-            filterChain.doFilter(wrapped, response);
-            return;
-        }
+        CachedBodyRequest wrapped = new CachedBodyRequest(request, body);
 
         try {
-            JsonNode root = mapper.readTree(body);
-            boolean handled = false;
-            for (JsonNode event : root.path("events")) {
-                if (!"message".equals(event.path("type").asText())) continue;
-                if (!"text".equals(event.path("message").path("type").asText())) continue;
-                String input = normalize(event.path("message").path("text").asText());
-                if (!MENU_COMMANDS.contains(input)) continue;
-                String userId = event.path("source").path("userId").asText();
-                if (!allowed(userId)) continue;
-                sendMenu(event.path("replyToken").asText(), canonical(input));
-                handled = true;
-            }
-            if (handled) {
+            for (LineWebhookSupport.TextEvent event : webhook.textEvents(body)) {
+                if (!MENU_COMMANDS.contains(event.text())) continue;
+                if (!webhook.isAuthorized(body, request.getHeader("x-line-signature"), event.userId())) {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    return;
+                }
+                webhook.reply(event.replyToken(), List.of(menuMessage(canonical(event.text()))));
                 response.setStatus(HttpServletResponse.SC_OK);
                 return;
             }
         } catch (Exception ignored) {
-            // Fall back to the existing webhook controller.
+            // 既存Webhook処理をフォールバックとして残す。
         }
-        filterChain.doFilter(wrapped, response);
+        chain.doFilter(wrapped, response);
     }
 
     private String canonical(String input) {
@@ -99,188 +76,97 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
         return "HOME";
     }
 
-    private void sendMenu(String replyToken, String type) throws Exception {
-        Map<String, Object> bubble = switch (type) {
-            case "SCHEDULE" -> scheduleBubble();
-            case "RECORD" -> recordBubble();
-            case "MONEY" -> moneyBubble();
-            case "GROWTH" -> growthBubble();
-            default -> homeBubble();
-        };
-        Map<String, Object> flex = new LinkedHashMap<>();
-        flex.put("type", "flex");
-        flex.put("altText", switch (type) {
+    private Map<String, Object> menuMessage(String type) {
+        Map<String, Object> message = new LinkedHashMap<>(FlexUi.flexMessage(altText(type), bubble(type)));
+        message.put("quickReply", quickReply());
+        return message;
+    }
+
+    private String altText(String type) {
+        return switch (type) {
             case "SCHEDULE" -> "ホーム ＞ 今日・予定";
             case "RECORD" -> "ホーム ＞ メモ・タスク";
             case "MONEY" -> "ホーム ＞ お金・買い物";
             case "GROWTH" -> "ホーム ＞ 習慣・成長";
             default -> "ベンリー ホーム";
-        });
-        flex.put("contents", bubble);
-        flex.put("quickReply", quickReply());
+        };
+    }
 
-        String json = mapper.writeValueAsString(Map.of("replyToken", replyToken, "messages", List.of(flex)));
-        HttpRequest req = HttpRequest.newBuilder(URI.create("https://api.line.me/v2/bot/message/reply"))
-                .header("Authorization", "Bearer " + props.channelAccessToken())
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)).build();
-        HttpResponse<Void> res = client.send(req, HttpResponse.BodyHandlers.discarding());
-        if (res.statusCode() / 100 != 2) throw new IllegalStateException("LINE API error: " + res.statusCode());
+    private Map<String, Object> bubble(String type) {
+        return switch (type) {
+            case "SCHEDULE" -> categoryBubble("🏠 ホーム ＞ 今日・予定", "予定と今日の確認", BLUE, "#E7EFFA", List.of(
+                    row(action("今日まとめ", "今日のダッシュボード", BLUE), action("予定一覧", "予定一覧", "#5E8BCB")),
+                    row(action("カレンダー", "カレンダー", "#6F9BD5"), action("予定追加", "予定追加", "#7EA8DB")),
+                    row(action("今日の天気", "今日の天気", "#8BAFDC"), action("通知設定", "通知設定", "#98B6D9"))
+            ));
+            case "RECORD" -> categoryBubble("🏠 ホーム ＞ メモ・タスク", "メモとやること", GREEN, "#E7F3EF", List.of(
+                    row(action("タスク一覧", "タスク一覧", GREEN), action("タスク追加", "タスク追加", "#5EAA96")),
+                    row(action("メモ一覧", "メモ一覧", "#6BB5A2"), action("メモ追加", "メモ追加", "#78BEAC")),
+                    row(action("自分のデータ", "自分のデータ", "#86B8AC"), action("統計", "統計", "#91C1B5"))
+            ));
+            case "MONEY" -> categoryBubble("🏠 ホーム ＞ お金・買い物", "支出と買い物", ORANGE, "#FAF0DF", List.of(
+                    row(action("家計簿", "家計簿", ORANGE), action("買い物一覧", "買い物一覧", "#D09538")),
+                    row(action("今日の支出", "今日いくら", "#D6A04A"), action("今月の支出", "今月いくら", "#DBAA59")),
+                    row(action("カテゴリ別", "カテゴリ別", "#E0B367"), action("支出一覧", "支出一覧", "#E3BA76"))
+            ));
+            case "GROWTH" -> categoryBubble("🏠 ホーム ＞ 習慣・成長", "習慣と成長", PURPLE, "#EFEAF8", List.of(
+                    row(action("今日の習慣", "今日の習慣", PURPLE), action("習慣追加", "習慣追加", "#8264BF")),
+                    row(action("ミッション", "今日のミッション", "#8D72C6"), action("プロフィール", "プロフィール", "#9780CD")),
+                    row(action("実績", "実績一覧", "#A18DD3"), action("今週成績", "今週ランキング", "#AA98D8"))
+            ));
+            default -> homeBubble();
+        };
     }
 
     private Map<String, Object> homeBubble() {
-        return bubble(
+        List<Map<String, Object>> body = new ArrayList<>();
+        body.add(FlexUi.text("⭐ よく使う", "sm", "bold", "#586174"));
+        body.add(row(action("今日まとめ", "今日のダッシュボード", "#627A9C"), action("タスク一覧", "タスク一覧", "#7187A5")));
+        body.add(action("買い物一覧", "買い物一覧", "#8193AB"));
+        body.add(Map.of("type", "separator", "margin", "sm", "color", "#E5E8EE"));
+        body.add(FlexUi.text("カテゴリ", "sm", "bold", "#586174"));
+        body.add(row(action("今日・予定", "予定メニュー", BLUE), action("メモ・タスク", "記録メニュー", GREEN)));
+        body.add(row(action("お金・買い物", "お金メニュー", ORANGE), action("習慣・成長", "成長メニュー", PURPLE)));
+        body.add(row(action("通知", "通知設定", "#7187A5"), action("使い方", "ヘルプ", GRAY)));
+        return FlexUi.bubble(
                 header("ベンリー", "使いたい機能を選んでね", "#4F5870", "#EEF1F6"),
-                box("#FCFDFE", "12px", List.of(
-                        sectionLabel("⭐ よく使う"),
-                        row(button("今日まとめ", "今日のダッシュボード", "#627A9C"), button("タスク一覧", "タスク一覧", "#7187A5")),
-                        button("買い物一覧", "買い物一覧", "#8193AB"),
-                        separator(),
-                        sectionLabel("カテゴリ"),
-                        row(button("今日・予定", "予定メニュー", "#4F7FC7"), button("メモ・タスク", "記録メニュー", "#4F9F8A")),
-                        row(button("お金・買い物", "お金メニュー", "#C68A2B"), button("習慣・成長", "成長メニュー", "#7656B8")),
-                        row(button("通知", "通知設定", "#7187A5"), button("使い方", "ヘルプ", "#8793A5"))
-                ))
+                FlexUi.vertical("#FCFDFE", "12px", "sm", body)
         );
     }
 
-    private Map<String, Object> scheduleBubble() {
-        return categoryBubble("🏠 ホーム ＞ 今日・予定", "予定と今日の確認", "#4F7FC7", "#E7EFFA", List.of(
-                row(button("今日まとめ", "今日のダッシュボード", "#4F7FC7"), button("予定一覧", "予定一覧", "#5E8BCB")),
-                row(button("カレンダー", "カレンダー", "#6F9BD5"), button("予定追加", "予定追加", "#7EA8DB")),
-                row(button("今日の天気", "今日の天気", "#8BAFDC"), button("通知設定", "通知設定", "#98B6D9"))
-        ));
-    }
-
-    private Map<String, Object> recordBubble() {
-        return categoryBubble("🏠 ホーム ＞ メモ・タスク", "メモとやること", "#4F9F8A", "#E7F3EF", List.of(
-                row(button("タスク一覧", "タスク一覧", "#4F9F8A"), button("タスク追加", "タスク追加", "#5EAA96")),
-                row(button("メモ一覧", "メモ一覧", "#6BB5A2"), button("メモ追加", "メモ追加", "#78BEAC")),
-                row(button("自分のデータ", "自分のデータ", "#86B8AC"), button("統計", "統計", "#91C1B5"))
-        ));
-    }
-
-    private Map<String, Object> moneyBubble() {
-        return categoryBubble("🏠 ホーム ＞ お金・買い物", "支出と買い物", "#C68A2B", "#FAF0DF", List.of(
-                row(button("家計簿", "家計簿", "#C68A2B"), button("買い物一覧", "買い物一覧", "#D09538")),
-                row(button("今日の支出", "今日いくら", "#D6A04A"), button("今月の支出", "今月いくら", "#DBAA59")),
-                row(button("カテゴリ別", "カテゴリ別", "#E0B367"), button("支出一覧", "支出一覧", "#E3BA76"))
-        ));
-    }
-
-    private Map<String, Object> growthBubble() {
-        return categoryBubble("🏠 ホーム ＞ 習慣・成長", "習慣と成長", "#7656B8", "#EFEAF8", List.of(
-                row(button("今日の習慣", "今日の習慣", "#7656B8"), button("習慣追加", "習慣追加", "#8264BF")),
-                row(button("ミッション", "今日のミッション", "#8D72C6"), button("プロフィール", "プロフィール", "#9780CD")),
-                row(button("実績", "実績一覧", "#A18DD3"), button("今週成績", "今週ランキング", "#AA98D8"))
-        ));
-    }
-
-    private Map<String, Object> categoryBubble(String title, String subtitle, String accent, String background,
-                                               List<Map<String, Object>> rows) {
-        java.util.ArrayList<Map<String, Object>> contents = new java.util.ArrayList<>(rows);
-        contents.add(button("🏠 ホーム", "ホーム", "#8793A5"));
-        return bubble(header(title, subtitle, accent, background), box("#FCFDFE", "12px", contents));
-    }
-
-    private Map<String, Object> bubble(Map<String, Object> header, Map<String, Object> body) {
-        return Map.of("type", "bubble", "size", "mega", "header", header, "body", body);
+    private Map<String, Object> categoryBubble(String title, String subtitle, String accent,
+                                               String background, List<Map<String, Object>> rows) {
+        List<Map<String, Object>> body = new ArrayList<>(rows);
+        body.add(action("🏠 ホーム", "ホーム", GRAY));
+        return FlexUi.bubble(header(title, subtitle, accent, background),
+                FlexUi.vertical("#FCFDFE", "12px", "sm", body));
     }
 
     private Map<String, Object> header(String title, String subtitle, String accent, String background) {
-        return box(background, "12px", List.of(
-                text(title, "lg", "bold", accent, "center"),
-                text(subtitle, "xs", "regular", "#6F7B8D", "center")
+        return FlexUi.vertical(background, "12px", "xs", List.of(
+                FlexUi.text(title, "lg", "bold", accent),
+                FlexUi.text(subtitle, "xs", "regular", "#6F7B8D")
         ));
     }
 
-    private Map<String, Object> box(String background, String padding, List<Map<String, Object>> contents) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("type", "box");
-        map.put("layout", "vertical");
-        map.put("backgroundColor", background);
-        map.put("paddingAll", padding);
-        map.put("spacing", "sm");
-        map.put("contents", contents);
-        return map;
-    }
-
     private Map<String, Object> row(Map<String, Object> left, Map<String, Object> right) {
-        return Map.of("type", "box", "layout", "horizontal", "spacing", "sm", "contents", List.of(left, right));
+        return FlexUi.horizontal(List.of(left, right));
     }
 
-    private Map<String, Object> button(String label, String message, String color) {
-        Map<String, Object> action = Map.of("type", "message", "label", label, "text", message);
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("type", "button");
-        map.put("style", "primary");
-        map.put("height", "sm");
-        map.put("color", color);
-        map.put("flex", 1);
-        map.put("adjustMode", "shrink-to-fit");
-        map.put("action", action);
-        return map;
-    }
-
-    private Map<String, Object> text(String value, String size, String weight, String color, String align) {
-        return Map.of("type", "text", "text", value, "size", size, "weight", weight,
-                "color", color, "align", align, "wrap", true);
-    }
-
-    private Map<String, Object> sectionLabel(String value) {
-        return text(value, "sm", "bold", "#586174", "start");
-    }
-
-    private Map<String, Object> separator() {
-        return Map.of("type", "separator", "margin", "sm", "color", "#E5E8EE");
+    private Map<String, Object> action(String label, String message, String color) {
+        Map<String, Object> button = new LinkedHashMap<>(FlexUi.button(label, message, color));
+        button.put("flex", 1);
+        return button;
     }
 
     private Map<String, Object> quickReply() {
         return Map.of("items", List.of(
                 quick("🏠 ホーム", "ホーム"), quick("今日", "今日のダッシュボード"),
-                quick("タスク", "タスク一覧"), quick("買い物", "買い物一覧"),
-                quick("通知", "通知設定")
+                quick("タスク", "タスク一覧"), quick("買い物", "買い物一覧"), quick("通知", "通知設定")
         ));
     }
 
     private Map<String, Object> quick(String label, String text) {
         return Map.of("type", "action", "action", Map.of("type", "message", "label", label, "text", text));
-    }
-
-    private boolean validSignature(byte[] body, String received) {
-        if (received == null || props.channelSecret() == null || props.channelSecret().isBlank()) return false;
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(props.channelSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String expected = Base64.getEncoder().encodeToString(mac.doFinal(body));
-            return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), received.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean allowed(String userId) {
-        return props.ownerUserId() == null || props.ownerUserId().isBlank() || props.ownerUserId().equals(userId);
-    }
-
-    private String normalize(String value) {
-        return value == null ? "" : value.replace('\u3000', ' ').replaceAll("[\\t\\n\\r ]+", " ").strip();
-    }
-
-    private static final class BodyRequest extends HttpServletRequestWrapper {
-        private final byte[] body;
-        private BodyRequest(HttpServletRequest request, byte[] body) { super(request); this.body = body; }
-        @Override public int getContentLength() { return body.length; }
-        @Override public long getContentLengthLong() { return body.length; }
-        @Override public ServletInputStream getInputStream() {
-            ByteArrayInputStream input = new ByteArrayInputStream(body);
-            return new ServletInputStream() {
-                @Override public boolean isFinished() { return input.available() == 0; }
-                @Override public boolean isReady() { return true; }
-                @Override public void setReadListener(ReadListener listener) {}
-                @Override public int read() { return input.read(); }
-                @Override public int read(byte[] b, int off, int len) { return input.read(b, off, len); }
-            };
-        }
     }
 }
