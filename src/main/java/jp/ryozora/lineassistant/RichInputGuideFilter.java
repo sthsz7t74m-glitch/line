@@ -17,7 +17,7 @@ import java.util.Map;
 import static jp.ryozora.lineassistant.FlexUi.*;
 
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 9)
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 public class RichInputGuideFilter extends OncePerRequestFilter {
     private final LineWebhookSupport webhook;
 
@@ -61,7 +61,7 @@ public class RichInputGuideFilter extends OncePerRequestFilter {
 
     private Guide guideFor(String input) {
         return switch (input) {
-            case "予定追加ガイド" -> new Guide(
+            case "予定追加ガイド", "予定追加", "明日19時" -> new Guide(
                     "予定を追加", "日時・繰り返し・通知を文章で指定できるよ", "#2E6FC4", "予定操作", "予定一覧",
                     List.of(
                             new Example("基本", "明日19時 歯医者"),
@@ -71,7 +71,7 @@ public class RichInputGuideFilter extends OncePerRequestFilter {
                             new Example("曜日指定", "毎週火曜20時 ジム"),
                             new Example("通知指定", "明日19時 歯医者 30分前と10分前")
                     ));
-            case "メモ追加ガイド" -> new Guide(
+            case "メモ追加ガイド", "メモ", "メモ追加" -> new Guide(
                     "メモを追加", "残したい内容を『メモ』に続けて送ってね", "#D98AAA", "メモタスク操作", "メモ一覧",
                     List.of(
                             new Example("短いメモ", "メモ 牛乳を買う"),
@@ -79,7 +79,7 @@ public class RichInputGuideFilter extends OncePerRequestFilter {
                             new Example("覚え書き", "メモ 会議では予算案を確認する"),
                             new Example("あとで検索", "メモ パスワード変更は金曜日")
                     ));
-            case "タスク追加ガイド" -> new Guide(
+            case "タスク追加ガイド", "タスク", "タスク追加" -> new Guide(
                     "タスクを追加", "やることを『タスク』に続けて送ってね", "#2E9B6B", "メモタスク操作", "タスク一覧",
                     List.of(
                             new Example("基本", "タスク 資料を提出"),
@@ -87,7 +87,7 @@ public class RichInputGuideFilter extends OncePerRequestFilter {
                             new Example("買い物系", "タスク クリーニングを受け取る"),
                             new Example("連絡系", "タスク 病院へ予約の電話をする")
                     ));
-            case "支出追加ガイド" -> new Guide(
+            case "支出追加ガイド", "支出", "支出追加", "支出記録" -> new Guide(
                     "支出を記録", "内容・金額・日付はいろいろな順番で入力できるよ", "#D88916", "お金買い物操作", "支出一覧",
                     List.of(
                             new Example("内容＋金額", "昼食 1200円"),
@@ -96,7 +96,7 @@ public class RichInputGuideFilter extends OncePerRequestFilter {
                             new Example("昨日指定", "昨日 日用品 2300円"),
                             new Example("日付指定", "7/20 病院 3000円")
                     ));
-            case "買い物追加ガイド" -> new Guide(
+            case "買い物追加ガイド", "買い物", "買い物追加" -> new Guide(
                     "買い物を追加", "買うものを『買い物』に続けて送ってね", "#E5A855", "お金買い物操作", "買い物一覧",
                     List.of(
                             new Example("1品", "買い物 ティッシュ"),
@@ -104,7 +104,7 @@ public class RichInputGuideFilter extends OncePerRequestFilter {
                             new Example("詳しく", "買い物 単3電池 8本入り"),
                             new Example("用途つき", "買い物 会議用の水 6本")
                     ));
-            case "習慣追加ガイド" -> new Guide(
+            case "習慣追加ガイド", "習慣", "習慣追加" -> new Guide(
                     "習慣を追加", "曜日・頻度・通知時刻を指定できるよ", "#7957C7", "習慣成長操作", "今日の習慣",
                     List.of(
                             new Example("毎日", "習慣 読書 毎日"),
@@ -113,6 +113,21 @@ public class RichInputGuideFilter extends OncePerRequestFilter {
                             new Example("曜日＋通知", "習慣 ゴミ出し 火土 8:00"),
                             new Example("毎日＋通知", "習慣 薬 毎日 21:00"),
                             new Example("通知なし", "習慣 日記 毎日")
+                    ));
+            case "予定変更" -> new Guide(
+                    "予定を変更", "予定一覧から対象の『変更』を押してね", "#2E6FC4", "予定一覧", "予定一覧",
+                    List.of(
+                            new Example("単発予定", "その予定だけ変更できる"),
+                            new Example("繰り返し予定", "対象範囲を選べる"),
+                            new Example("操作方法", "一覧カードから選ぶので番号を覚えなくてOK")
+                    ));
+            case "予定削除" -> new Guide(
+                    "予定を削除", "予定一覧から対象の『削除』を押してね", "#C95C66", "予定一覧", "予定一覧",
+                    List.of(
+                            new Example("単発", "この予定だけ削除"),
+                            new Example("繰り返し", "この回だけ削除"),
+                            new Example("繰り返し", "この回以降を削除"),
+                            new Example("繰り返し", "シリーズ全部を削除")
                     ));
             default -> null;
         };
