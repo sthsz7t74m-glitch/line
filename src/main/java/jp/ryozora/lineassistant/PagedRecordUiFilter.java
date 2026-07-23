@@ -1,12 +1,7 @@
 package jp.ryozora.lineassistant;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.ReadListener;
-import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -14,23 +9,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,15 +28,12 @@ public class PagedRecordUiFilter extends OncePerRequestFilter {
     private static final Pattern DETAIL = Pattern.compile("^(メモ詳細|タスク詳細)\\s+(\\d+)$");
     private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
 
-    private final ObjectMapper mapper;
     private final JdbcTemplate jdbc;
-    private final LineProperties props;
-    private final HttpClient client = HttpClient.newHttpClient();
+    private final LineWebhookSupport webhook;
 
-    public PagedRecordUiFilter(ObjectMapper mapper, JdbcTemplate jdbc, LineProperties props) {
-        this.mapper = mapper;
+    public PagedRecordUiFilter(JdbcTemplate jdbc, LineWebhookSupport webhook) {
         this.jdbc = jdbc;
-        this.props = props;
+        this.webhook = webhook;
     }
 
     @Override
@@ -67,41 +47,46 @@ public class PagedRecordUiFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain chain) throws IOException {
         byte[] body = request.getInputStream().readAllBytes();
-        CachedRequest wrapped = new CachedRequest(request, body);
+        CachedBodyRequest wrapped = new CachedBodyRequest(request, body);
         try {
-            JsonNode root = mapper.readTree(body);
-            for (JsonNode event : root.path("events")) {
-                if (!"message".equals(event.path("type").asText())) continue;
-                if (!"text".equals(event.path("message").path("type").asText())) continue;
-                String input = normalize(event.path("message").path("text").asText());
-                Matcher pageMatcher = PAGE.matcher(input);
-                Matcher detailMatcher = DETAIL.matcher(input);
+            for (LineWebhookSupport.TextEvent event : webhook.textEvents(body)) {
+                Matcher pageMatcher = PAGE.matcher(event.text());
+                Matcher detailMatcher = DETAIL.matcher(event.text());
                 if (!pageMatcher.matches() && !detailMatcher.matches()) continue;
-                if (!validSignature(body, request.getHeader("x-line-signature"))) {
+                if (!webhook.isAuthorized(body, request.getHeader("x-line-signature"), event.userId())) {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                     return;
                 }
-                String userId = event.path("source").path("userId").asText();
-                if (!allowed(userId)) {
-                    response.setStatus(HttpServletResponse.SC_OK);
-                    return;
-                }
-                String replyToken = event.path("replyToken").asText();
+
+                Map<String, Object> bubble;
+                String altText;
                 if (pageMatcher.matches()) {
                     int page = pageMatcher.group(2) == null ? 1 : Math.max(1, Integer.parseInt(pageMatcher.group(2)));
                     if (pageMatcher.group(1).startsWith("メモ")) {
-                        replyFlex(replyToken, "メモ一覧", memoListBubble(userId, page));
+                        bubble = memoListBubble(event.userId(), page);
+                        altText = "メモ一覧";
                     } else {
-                        replyFlex(replyToken, "タスク一覧", taskListBubble(userId, page));
+                        bubble = taskListBubble(event.userId(), page);
+                        altText = "タスク一覧";
                     }
                 } else {
                     int number = Integer.parseInt(detailMatcher.group(2));
                     if (detailMatcher.group(1).startsWith("メモ")) {
-                        replyFlex(replyToken, "メモ詳細", memoDetailBubble(userId, number));
+                        bubble = memoDetailBubble(event.userId(), number);
+                        altText = "メモ詳細";
                     } else {
-                        replyFlex(replyToken, "タスク詳細", taskDetailBubble(userId, number));
+                        bubble = taskDetailBubble(event.userId(), number);
+                        altText = "タスク詳細";
                     }
                 }
+
+                Map<String, Object> flex = new LinkedHashMap<>(FlexUi.flexMessage(altText, bubble));
+                flex.put("quickReply", Map.of("items", List.of(
+                        FlexUi.quick("🏠 ホーム", "ホーム"),
+                        FlexUi.quick("メモ", "メモ一覧"),
+                        FlexUi.quick("タスク", "タスク一覧")
+                )));
+                webhook.reply(event.replyToken(), List.of(flex));
                 response.setStatus(HttpServletResponse.SC_OK);
                 return;
             }
@@ -211,12 +196,13 @@ public class PagedRecordUiFilter extends OncePerRequestFilter {
         List<TaskRow> rows = taskRows(userId);
         if (number < 1 || number > rows.size()) return missingBubble("タスク", "タスク一覧");
         TaskRow row = rows.get(number - 1);
-        List<Map<String, Object>> body = new ArrayList<>();
         List<Map<String, Object>> content = new ArrayList<>();
         content.add(text(row.title(), "md", "bold", "#243B53"));
         content.add(text("優先度：" + priorityName(row.priority()), "xxs", "regular", "#718096"));
         String due = due(row.dueAt());
         if (!due.isBlank()) content.add(text(due, "xxs", "regular", row.overdue() ? "#B94A55" : "#718096"));
+
+        List<Map<String, Object>> body = new ArrayList<>();
         body.add(group("#F7FBFA", content));
         body.add(horizontal(List.of(
                 primary("完了", "タスク完了確認 " + number, "#4AAE9E"),
@@ -281,63 +267,42 @@ public class PagedRecordUiFilter extends OncePerRequestFilter {
 
     private Map<String, Object> bubble(String title, String subtitle, String accent,
                                        String headerColor, List<Map<String, Object>> body) {
-        Map<String, Object> bubble = new LinkedHashMap<>();
-        bubble.put("type", "bubble");
-        bubble.put("size", "mega");
-        bubble.put("header", vertical(headerColor, "12px", "xs", List.of(
-                text(title, "lg", "bold", accent),
-                text(subtitle, "xxs", "regular", "#718096")
-        )));
-        bubble.put("body", vertical("#FCFDFE", "12px", "sm", body));
-        return bubble;
+        return FlexUi.bubble(
+                FlexUi.vertical(headerColor, "12px", "xs", List.of(
+                        text(title, "lg", "bold", accent),
+                        text(subtitle, "xxs", "regular", "#718096")
+                )),
+                FlexUi.vertical("#FCFDFE", "12px", "sm", body)
+        );
     }
 
     private Map<String, Object> group(String background, List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "vertical");
-        box.put("backgroundColor", background);
-        box.put("cornerRadius", "12px");
-        box.put("paddingAll", "10px");
-        box.put("spacing", "xs");
-        box.put("contents", contents);
-        return box;
-    }
-
-    private Map<String, Object> vertical(String background, String padding, String spacing,
-                                         List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "vertical");
-        box.put("backgroundColor", background);
-        box.put("paddingAll", padding);
-        box.put("spacing", spacing);
-        box.put("contents", contents);
-        return box;
+        return FlexUi.card(background, "10px", "xs", contents);
     }
 
     private Map<String, Object> horizontal(List<Map<String, Object>> contents) {
-        return Map.of("type", "box", "layout", "horizontal", "spacing", "sm", "contents", contents);
+        return FlexUi.horizontal(contents);
     }
 
     private Map<String, Object> text(String value, String size, String weight, String color) {
-        return Map.of("type", "text", "text", value, "size", size, "weight", weight,
-                "color", color, "wrap", true, "flex", 1);
+        Map<String, Object> text = new LinkedHashMap<>(FlexUi.text(value, size, weight, color));
+        text.put("flex", 1);
+        return text;
     }
 
     private Map<String, Object> primary(String label, String message, String color) {
-        return button(label, message, "primary", color);
+        return styledButton(label, message, "primary", color);
     }
 
     private Map<String, Object> secondary(String label, String message) {
-        return button(label, message, "secondary", null);
+        return styledButton(label, message, "secondary", null);
     }
 
     private Map<String, Object> danger(String label, String message) {
-        return button(label, message, "primary", "#C95C66");
+        return styledButton(label, message, "primary", "#C95C66");
     }
 
-    private Map<String, Object> button(String label, String message, String style, String color) {
+    private Map<String, Object> styledButton(String label, String message, String style, String color) {
         Map<String, Object> button = new LinkedHashMap<>();
         button.put("type", "button");
         button.put("style", style);
@@ -367,84 +332,12 @@ public class PagedRecordUiFilter extends OncePerRequestFilter {
 
     private String due(java.time.OffsetDateTime dueAt) {
         if (dueAt == null) return "期限なし";
-        String label = dueAt.atZoneSameInstant(TOKYO).format(DateTimeFormatter.ofPattern("M/d（E）H:mm", java.util.Locale.JAPANESE));
+        String label = dueAt.atZoneSameInstant(TOKYO)
+                .format(DateTimeFormatter.ofPattern("M/d（E）H:mm", java.util.Locale.JAPANESE));
         return dueAt.toInstant().isBefore(java.time.Instant.now()) ? "期限切れ：" + label : "期限：" + label;
-    }
-
-    private void replyFlex(String replyToken, String altText, Map<String, Object> bubble) throws Exception {
-        Map<String, Object> flex = new LinkedHashMap<>();
-        flex.put("type", "flex");
-        flex.put("altText", altText);
-        flex.put("contents", bubble);
-        flex.put("quickReply", Map.of("items", List.of(
-                quick("🏠 ホーム", "ホーム"),
-                quick("メモ", "メモ一覧"),
-                quick("タスク", "タスク一覧")
-        )));
-        sendReply(replyToken, List.of(flex));
-    }
-
-    private Map<String, Object> quick(String label, String message) {
-        return Map.of("type", "action", "action", Map.of(
-                "type", "message", "label", label, "text", message
-        ));
-    }
-
-    private void sendReply(String replyToken, List<Map<String, Object>> messages) throws Exception {
-        String json = mapper.writeValueAsString(Map.of("replyToken", replyToken, "messages", messages));
-        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.line.me/v2/bot/message/reply"))
-                .header("Authorization", "Bearer " + props.channelAccessToken())
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
-                .build();
-        HttpResponse<Void> result = client.send(request, HttpResponse.BodyHandlers.discarding());
-        if (result.statusCode() / 100 != 2) throw new IllegalStateException("LINE API error: HTTP " + result.statusCode());
-    }
-
-    private boolean validSignature(byte[] body, String received) {
-        if (received == null || props.channelSecret() == null || props.channelSecret().isBlank()) return false;
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(props.channelSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String expected = Base64.getEncoder().encodeToString(mac.doFinal(body));
-            return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), received.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean allowed(String userId) {
-        return props.ownerUserId() == null || props.ownerUserId().isBlank() || props.ownerUserId().equals(userId);
-    }
-
-    private String normalize(String value) {
-        return value == null ? "" : value.replace('　', ' ').replaceAll("[\\t\\n\\r ]+", " ").strip();
     }
 
     private record MemoRow(long id, String content, boolean favorite, String tags) { }
     private record TaskRow(long id, String title, String priority,
                            java.time.OffsetDateTime dueAt, boolean overdue) { }
-
-    private static final class CachedRequest extends HttpServletRequestWrapper {
-        private final byte[] body;
-        private CachedRequest(HttpServletRequest request, byte[] body) {
-            super(request);
-            this.body = body;
-        }
-        @Override
-        public ServletInputStream getInputStream() {
-            ByteArrayInputStream input = new ByteArrayInputStream(body);
-            return new ServletInputStream() {
-                @Override public boolean isFinished() { return input.available() == 0; }
-                @Override public boolean isReady() { return true; }
-                @Override public void setReadListener(ReadListener listener) { }
-                @Override public int read() { return input.read(); }
-                @Override public int read(byte[] b, int off, int len) { return input.read(b, off, len); }
-            };
-        }
-        @Override
-        public BufferedReader getReader() {
-            return new BufferedReader(new InputStreamReader(getInputStream(), StandardCharsets.UTF_8));
-        }
-    }
 }
