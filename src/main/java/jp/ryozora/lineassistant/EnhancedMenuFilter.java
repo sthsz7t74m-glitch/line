@@ -122,12 +122,16 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
         List<Map<String, Object>> body = new ArrayList<>();
         body.add(FlexUi.text("⭐ よく使う", "sm", "bold", "#586174"));
         body.add(row(action("今日まとめ", "今日のダッシュボード", "#627A9C"), action("タスク一覧", "タスク一覧", "#7187A5")));
-        body.add(action("買い物一覧", "買い物一覧", "#8193AB"));
+        body.add(row(action("買い物一覧", "買い物一覧", "#8193AB"), action("全体検索", "検索", "#667EA8")));
         body.add(Map.of("type", "separator", "margin", "sm", "color", "#E5E8EE"));
         body.add(FlexUi.text("カテゴリ", "sm", "bold", "#586174"));
         body.add(row(action("今日・予定", "予定メニュー", BLUE), action("メモ・タスク", "記録メニュー", GREEN)));
         body.add(row(action("お金・買い物", "お金メニュー", ORANGE), action("習慣・成長", "成長メニュー", PURPLE)));
-        body.add(row(action("通知", "通知設定", "#7187A5"), action("使い方", "ヘルプ", GRAY)));
+        body.add(Map.of("type", "separator", "margin", "sm", "color", "#E5E8EE"));
+        body.add(FlexUi.text("管理・確認", "sm", "bold", "#586174"));
+        body.add(row(action("入力状態", "入力状態", "#C68A2B"), action("通知履歴", "通知履歴", "#7187A5")));
+        body.add(row(action("通知設定", "通知設定", "#7898CF"), action("診断", "診断", "#667EA8")));
+        body.add(action("使い方", "ヘルプ", GRAY));
         return FlexUi.bubble(
                 header("ベンリー", "使いたい機能を選んでね", "#4F5870", "#EEF1F6"),
                 FlexUi.vertical("#FCFDFE", "12px", "sm", body)
@@ -162,7 +166,7 @@ public class EnhancedMenuFilter extends OncePerRequestFilter {
     private Map<String, Object> quickReply() {
         return Map.of("items", List.of(
                 quick("🏠 ホーム", "ホーム"), quick("今日", "今日のダッシュボード"),
-                quick("タスク", "タスク一覧"), quick("買い物", "買い物一覧"), quick("通知", "通知設定")
+                quick("検索", "検索"), quick("タスク", "タスク一覧"), quick("通知", "通知設定")
         ));
     }
 
