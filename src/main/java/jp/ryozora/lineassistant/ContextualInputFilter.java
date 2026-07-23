@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,27 +31,21 @@ public class ContextualInputFilter extends OncePerRequestFilter {
     private final PendingInputContext context;
     private final BenlyCommandService commandService;
     private final TaskService taskService;
-    private final AdvancedScheduleService scheduleService;
     private final SchedulePartialEditService schedulePartialEditService;
-    private final HabitService habitService;
-    private final ExpenseService expenseService;
+    private final ContextualPartialEditService partialEditService;
 
     public ContextualInputFilter(LineWebhookSupport webhook,
                                  PendingInputContext context,
                                  BenlyCommandService commandService,
                                  TaskService taskService,
-                                 AdvancedScheduleService scheduleService,
                                  SchedulePartialEditService schedulePartialEditService,
-                                 HabitService habitService,
-                                 ExpenseService expenseService) {
+                                 ContextualPartialEditService partialEditService) {
         this.webhook = webhook;
         this.context = context;
         this.commandService = commandService;
         this.taskService = taskService;
-        this.scheduleService = scheduleService;
         this.schedulePartialEditService = schedulePartialEditService;
-        this.habitService = habitService;
-        this.expenseService = expenseService;
+        this.partialEditService = partialEditService;
     }
 
     @Override
@@ -136,11 +130,11 @@ public class ContextualInputFilter extends OncePerRequestFilter {
         int number = pending.number();
         return switch (pending.type()) {
             case MEMO_EDIT -> commandService.handle(userId, "メモ編集 " + number + " " + input);
-            case TASK_EDIT -> taskService.handle(userId, "タスク変更 " + number + " " + input);
+            case TASK_EDIT -> partialEditService.editTask(userId, number, input);
             case TASK_POSTPONE -> taskService.handle(userId, "タスク延期 " + number + " " + input);
             case SCHEDULE_EDIT -> schedulePartialEditService.edit(userId, number, input);
-            case HABIT_EDIT -> habitService.handle(userId, "習慣編集 " + number + " " + input);
-            case EXPENSE_EDIT -> expenseService.handle(userId, "支出編集 " + number + " " + input);
+            case HABIT_EDIT -> partialEditService.editHabit(userId, number, input);
+            case EXPENSE_EDIT -> partialEditService.editExpense(userId, number, input);
         };
     }
 
@@ -153,52 +147,58 @@ public class ContextualInputFilter extends OncePerRequestFilter {
         if (result == null || result.isBlank()) return true;
         return result.contains("読み取れなかった") || result.contains("見つからなかった")
                 || result.contains("確認してね") || result.startsWith("例：")
-                || result.contains("の形で送ってね") || result.contains("できなかった");
+                || result.contains("の形で送ってね") || result.contains("できなかった")
+                || result.contains("変更する項目を読み取れなかった");
     }
 
     private Map<String, Object> promptMessage(PendingInputContext.Type type, int number) {
-        String title = title(type);
-        String instruction = instruction(type);
+        List<Map<String, Object>> body = new ArrayList<>();
+        body.add(FlexUi.card("#F7F9FC", "10px", "xs", List.of(
+                FlexUi.text(instruction(type), "sm", "bold", "#334E68"),
+                FlexUi.text(contextHint(type), "xxs", "regular", "#718096")
+        )));
+        Map<String, Object> examples = exampleButtons(type);
+        if (examples != null) body.add(examples);
+        body.add(FlexUi.horizontal(List.of(
+                FlexUi.button("キャンセル", "キャンセル", "#8793A5"),
+                FlexUi.button("🏠 ホーム", "ホーム", "#8793A5")
+        )));
+
         Map<String, Object> bubble = FlexUi.bubble(
                 FlexUi.vertical("#EEF2F7", "12px", "xs", List.of(
-                        FlexUi.text(title, "lg", "bold", "#334E68"),
-                        FlexUi.text("対象 No." + number, "xxs", "regular", "#718096")
+                        FlexUi.text(title(type), "lg", "bold", "#334E68"),
+                        FlexUi.text("対象 No." + number + "・入力待ち中", "xxs", "regular", "#718096")
                 )),
-                FlexUi.vertical("#FCFDFE", "12px", "sm", List.of(
-                        FlexUi.card("#F7F9FC", "10px", "xs", List.of(
-                                FlexUi.text(instruction, "sm", "bold", "#334E68"),
-                                FlexUi.text(contextHint(type), "xxs", "regular", "#718096")
-                        )),
-                        FlexUi.horizontal(List.of(
-                                FlexUi.button("キャンセル", "キャンセル", "#8793A5"),
-                                FlexUi.button("🏠 ホーム", "ホーム", "#8793A5")
-                        ))
-                ))
+                FlexUi.vertical("#FCFDFE", "12px", "sm", body)
         );
-        return FlexUi.flexMessage(title, bubble);
+        return FlexUi.flexMessage(title(type), bubble);
     }
 
     private Map<String, Object> retryMessage(PendingInputContext.Pending pending, String result) {
+        List<Map<String, Object>> body = new ArrayList<>();
+        body.add(FlexUi.card("#FFF9F0", "10px", "xs", List.of(
+                FlexUi.text(result, "sm", "regular", "#526D82"),
+                FlexUi.text(instruction(pending.type()), "xxs", "regular", "#718096")
+        )));
+        Map<String, Object> examples = exampleButtons(pending.type());
+        if (examples != null) body.add(examples);
+        body.add(FlexUi.button("キャンセル", "キャンセル", "#8793A5"));
+
         Map<String, Object> bubble = FlexUi.bubble(
                 FlexUi.vertical("#FFF2DE", "12px", "xs", List.of(
                         FlexUi.text("入力を確認してね", "lg", "bold", "#C68A2B"),
-                        FlexUi.text("入力待ちは継続中", "xxs", "regular", "#718096")
+                        FlexUi.text("対象 No." + pending.number() + "・入力待ちは継続中", "xxs", "regular", "#718096")
                 )),
-                FlexUi.vertical("#FCFDFE", "12px", "sm", List.of(
-                        FlexUi.card("#FFF9F0", "10px", "xs", List.of(
-                                FlexUi.text(result, "sm", "regular", "#526D82"),
-                                FlexUi.text(instruction(pending.type()), "xxs", "regular", "#718096")
-                        )),
-                        FlexUi.button("キャンセル", "キャンセル", "#8793A5")
-                ))
+                FlexUi.vertical("#FCFDFE", "12px", "sm", body)
         );
         return FlexUi.flexMessage("入力を確認してね", bubble);
     }
 
     private Map<String, Object> successMessage(PendingInputContext.Pending pending, String result) {
         List<Map<String, Object>> lines = result.lines().map(String::strip)
-                .filter(v -> !v.isBlank()).limit(8)
-                .map(v -> FlexUi.text(v, "sm", "regular", "#526D82")).toList();
+                .filter(v -> !v.isBlank()).limit(10)
+                .map(v -> FlexUi.text(v, "sm", v.startsWith("変更前") || v.startsWith("変更後") ? "bold" : "regular", "#526D82"))
+                .toList();
         Map<String, Object> bubble = FlexUi.bubble(
                 FlexUi.vertical("#E7F7F1", "12px", "xs", List.of(
                         FlexUi.text("✓ 変更したよ", "lg", "bold", "#2E9B6B"),
@@ -213,6 +213,33 @@ public class ContextualInputFilter extends OncePerRequestFilter {
                 ))
         );
         return FlexUi.flexMessage("変更したよ", bubble);
+    }
+
+    private Map<String, Object> exampleButtons(PendingInputContext.Type type) {
+        return switch (type) {
+            case TASK_EDIT -> FlexUi.horizontal(List.of(
+                    secondary("明日", "明日"), secondary("17:30", "17:30"), secondary("優先度高", "優先度高")));
+            case TASK_POSTPONE -> FlexUi.horizontal(List.of(
+                    secondary("1時間後", "1時間後"), secondary("明日", "明日"), secondary("3日後", "3日後")));
+            case SCHEDULE_EDIT -> FlexUi.horizontal(List.of(
+                    secondary("明日", "明日"), secondary("17:30", "17:30"), secondary("7/30", "7/30")));
+            case HABIT_EDIT -> FlexUi.horizontal(List.of(
+                    secondary("毎日", "毎日"), secondary("21:00", "21:00"), secondary("通知なし", "通知なし")));
+            case EXPENSE_EDIT -> FlexUi.horizontal(List.of(
+                    secondary("500円", "500円"), secondary("今日", "今日"), secondary("食費", "食費")));
+            case MEMO_EDIT -> null;
+        };
+    }
+
+    private Map<String, Object> secondary(String label, String message) {
+        Map<String, Object> button = new java.util.LinkedHashMap<>();
+        button.put("type", "button");
+        button.put("style", "secondary");
+        button.put("height", "sm");
+        button.put("flex", 1);
+        button.put("adjustMode", "shrink-to-fit");
+        button.put("action", Map.of("type", "message", "label", label, "text", message));
+        return button;
     }
 
     private Map<String, Object> textMessage(String text) {
@@ -233,18 +260,20 @@ public class ContextualInputFilter extends OncePerRequestFilter {
     private String instruction(PendingInputContext.Type type) {
         return switch (type) {
             case MEMO_EDIT -> "新しいメモ内容を送ってね";
-            case TASK_EDIT -> "新しい内容・期限・優先度を送ってね";
+            case TASK_EDIT -> "変更したい内容・期限・時刻・優先度だけ送ってね";
             case TASK_POSTPONE -> "延期先を送ってね（例：明日、1時間後）";
-            case SCHEDULE_EDIT -> "変更したい部分だけ送ってね（例：遊園地 / 17:30 / 7/30 / きょう17:30 遊園地）";
-            case HABIT_EDIT -> "新しい習慣内容・曜日・通知時刻を送ってね";
-            case EXPENSE_EDIT -> "新しい金額と内容を送ってね";
+            case SCHEDULE_EDIT -> "変更したい内容・日付・時刻だけ送ってね";
+            case HABIT_EDIT -> "変更したい内容・曜日・通知時刻だけ送ってね";
+            case EXPENSE_EDIT -> "変更したい内容・金額・日付・分類だけ送ってね";
         };
     }
 
     private String contextHint(PendingInputContext.Type type) {
-        return type == PendingInputContext.Type.SCHEDULE_EDIT
-                ? "内容だけ・時刻だけ・日付だけでも、その部分だけ変更するよ"
-                : "次のメッセージをそのまま変更内容として使うよ";
+        return switch (type) {
+            case MEMO_EDIT -> "次の文章を新しいメモ内容として使うよ";
+            case TASK_POSTPONE -> "送った延期先だけを反映するよ";
+            default -> "送られた項目だけ変更し、書かなかった項目はそのまま残すよ";
+        };
     }
 
     private String listCommand(PendingInputContext.Type type) {
