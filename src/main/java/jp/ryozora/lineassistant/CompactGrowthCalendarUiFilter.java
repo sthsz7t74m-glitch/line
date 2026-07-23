@@ -5,13 +5,21 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -23,17 +31,18 @@ public class CompactGrowthCalendarUiFilter extends OncePerRequestFilter {
             "プロフィール", "ステータス", "レベル", "経験値", "称号",
             "実績", "実績一覧", "バッジ"
     );
+    private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
 
     private final LineWebhookSupport webhook;
-    private final BenlyCommandService commandService;
     private final RpgService rpgService;
+    private final JdbcTemplate jdbc;
 
     public CompactGrowthCalendarUiFilter(LineWebhookSupport webhook,
-                                         BenlyCommandService commandService,
-                                         RpgService rpgService) {
+                                         RpgService rpgService,
+                                         JdbcTemplate jdbc) {
         this.webhook = webhook;
-        this.commandService = commandService;
         this.rpgService = rpgService;
+        this.jdbc = jdbc;
     }
 
     @Override
@@ -60,7 +69,7 @@ public class CompactGrowthCalendarUiFilter extends OncePerRequestFilter {
                 Map<String, Object> bubble;
                 String altText;
                 if (input.contains("カレンダー")) {
-                    bubble = calendarBubble(commandService.handle(event.userId(), input));
+                    bubble = calendarBubble(event.userId());
                     altText = "週間カレンダー";
                 } else if (Set.of("実績", "実績一覧", "バッジ").contains(input)) {
                     bubble = achievementsBubble(rpgService.handle(event.userId(), input));
@@ -91,24 +100,34 @@ public class CompactGrowthCalendarUiFilter extends OncePerRequestFilter {
         }
     }
 
-    private Map<String, Object> calendarBubble(String raw) {
-        List<String> lines = cleanLines(raw);
-        List<Map<String, Object>> days = new ArrayList<>();
+    private Map<String, Object> calendarBubble(String userId) {
+        LocalDate today = LocalDate.now(TOKYO);
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end = today.plusDays(7).atStartOfDay();
+        List<CalendarEvent> rows = jdbc.query("""
+                select title, starts_at
+                from schedules
+                where line_user_id=? and starts_at>=? and starts_at<?
+                order by starts_at
+                """, (rs, i) -> new CalendarEvent(
+                rs.getString("title"),
+                rs.getTimestamp("starts_at").toInstant().atZone(TOKYO).toLocalDateTime()
+        ), userId, Timestamp.from(start.atZone(TOKYO).toInstant()), Timestamp.from(end.atZone(TOKYO).toInstant()));
 
-        String currentDate = null;
-        List<String> events = new ArrayList<>();
-        for (String line : lines) {
-            if (line.contains("カレンダー") || isDivider(line)) continue;
-            if (line.matches("^\\d{1,2}/\\d{1,2}.*")) {
-                if (currentDate != null) days.add(dayCard(currentDate, events));
-                currentDate = line;
-                events = new ArrayList<>();
-            } else if (currentDate != null) {
-                events.add(line.replaceFirst("^[・•]\\s*", ""));
+        List<Map<String, Object>> days = new ArrayList<>();
+        for (int offset = 0; offset < 7; offset++) {
+            LocalDate date = today.plusDays(offset);
+            List<String> events = rows.stream()
+                    .filter(row -> row.at().toLocalDate().equals(date))
+                    .map(row -> row.at().format(DateTimeFormatter.ofPattern("H:mm")) + "　" + row.title())
+                    .toList();
+            if (!events.isEmpty()) {
+                String dateLabel = date.format(DateTimeFormatter.ofPattern("M/d")) + "（"
+                        + date.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.JAPANESE) + "）";
+                days.add(dayCard(dateLabel, events));
             }
         }
-        if (currentDate != null) days.add(dayCard(currentDate, events));
-        if (days.isEmpty()) days.add(text("今週の予定はまだないよ", "md", "regular", "#526D82"));
+        if (days.isEmpty()) days.add(text("今後7日間の予定はまだないよ", "md", "regular", "#526D82"));
 
         List<Map<String, Object>> body = new ArrayList<>(days);
         body.add(horizontal(List.of(
@@ -116,19 +135,13 @@ public class CompactGrowthCalendarUiFilter extends OncePerRequestFilter {
                 button("予定追加", "予定追加", "#76B4E3")
         )));
         body.add(button("🏠 ホーム", "ホーム", "#8592A6"));
-        return bubble("週間カレンダー", "7日間をコンパクト表示", "#2E6FC4", "#E5EFFF", body);
+        return bubble("週間カレンダー", "今日から7日間を表示", "#2E6FC4", "#E5EFFF", body);
     }
 
     private Map<String, Object> dayCard(String date, List<String> events) {
         List<Map<String, Object>> content = new ArrayList<>();
         content.add(text(date, "md", "bold", "#2E6FC4"));
-        if (events.isEmpty()) {
-            content.add(text("予定なし", "xs", "regular", "#8A96A6"));
-        } else {
-            for (String event : events) {
-                content.add(text(event, "sm", "regular", event.contains("予定なし") ? "#8A96A6" : "#334E68"));
-            }
-        }
+        for (String event : events) content.add(text(event, "sm", "regular", "#334E68"));
         return groupBox("#F5F8FD", "10px", content);
     }
 
@@ -261,7 +274,5 @@ public class CompactGrowthCalendarUiFilter extends OncePerRequestFilter {
         return lines.stream().filter(v -> v.startsWith(prefix)).findFirst().orElse(fallback);
     }
 
-    private boolean isDivider(String value) {
-        return value.matches("^[━─ー_=\\-]{3,}$");
-    }
+    private record CalendarEvent(String title, LocalDateTime at) { }
 }
