@@ -1,12 +1,7 @@
 package jp.ryozora.lineassistant;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.ReadListener;
-import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -14,23 +9,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,17 +26,14 @@ public class RecordManagementFilter extends OncePerRequestFilter {
     private static final Pattern NUMBER = Pattern.compile("(\\d+)");
     private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
 
-    private final ObjectMapper mapper;
     private final JdbcTemplate jdbc;
     private final BenlyStore store;
-    private final LineProperties props;
-    private final HttpClient client = HttpClient.newHttpClient();
+    private final LineWebhookSupport line;
 
-    public RecordManagementFilter(ObjectMapper mapper, JdbcTemplate jdbc, BenlyStore store, LineProperties props) {
-        this.mapper = mapper;
+    public RecordManagementFilter(JdbcTemplate jdbc, BenlyStore store, LineWebhookSupport line) {
         this.jdbc = jdbc;
         this.store = store;
-        this.props = props;
+        this.line = line;
     }
 
     @Override
@@ -66,35 +46,22 @@ public class RecordManagementFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws IOException {
         byte[] body = request.getInputStream().readAllBytes();
-        CachedRequest wrapped = new CachedRequest(request, body);
-
+        CachedBodyRequest wrapped = new CachedBodyRequest(request, body);
         try {
-            JsonNode root = mapper.readTree(body);
-            for (JsonNode event : root.path("events")) {
-                if (!"message".equals(event.path("type").asText())) continue;
-                if (!"text".equals(event.path("message").path("type").asText())) continue;
-
-                String input = event.path("message").path("text").asText().strip();
+            for (LineWebhookSupport.TextEvent event : line.textEvents(body)) {
+                String input = event.text();
                 if (!supports(input)) continue;
-                if (!validSignature(body, request.getHeader("x-line-signature"))) {
+                if (!line.isAuthorized(body, request.getHeader("x-line-signature"), event.userId())) {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                     return;
                 }
-
-                String userId = event.path("source").path("userId").asText();
-                if (!allowed(userId)) {
-                    response.setStatus(HttpServletResponse.SC_OK);
-                    return;
-                }
-
-                handle(event.path("replyToken").asText(), userId, input);
+                handle(event.replyToken(), event.userId(), input);
                 response.setStatus(HttpServletResponse.SC_OK);
                 return;
             }
         } catch (Exception ignored) {
             // Existing webhook processing remains the fallback.
         }
-
         try {
             chain.doFilter(wrapped, response);
         } catch (Exception e) {
@@ -207,28 +174,28 @@ public class RecordManagementFilter extends OncePerRequestFilter {
         List<MemoRow> rows = memoRows(userId);
         List<Map<String, Object>> body = new ArrayList<>();
         if (rows.isEmpty()) {
-            body.add(text("メモはまだないよ", "md", "regular", "#526D82"));
+            body.add(FlexUi.text("メモはまだないよ", "md", "regular", "#526D82"));
         } else {
             for (int i = 0; i < rows.size(); i++) {
                 MemoRow row = rows.get(i);
                 String label = (row.favorite() ? "★ " : "") + (i + 1) + ". " + row.content();
                 List<Map<String, Object>> card = new ArrayList<>();
-                card.add(text(label, "md", "bold", "#243B53"));
+                card.add(FlexUi.text(label, "md", "bold", "#243B53"));
                 if (row.tags() != null && !row.tags().isBlank()) {
-                    card.add(text("#" + row.tags().replace(",", "  #"), "xs", "regular", "#7A6B89"));
+                    card.add(FlexUi.text("#" + row.tags().replace(",", "  #"), "xs", "regular", "#7A6B89"));
                 }
-                card.add(horizontal(List.of(
-                        button("編集", "メモ編集案内 " + (i + 1), "#6CA6E5"),
-                        button(row.favorite() ? "★解除" : "★お気に入り", "メモお気に入り実行 " + (i + 1), "#D7A63E"),
-                        button("削除", "メモ削除確認 " + (i + 1), "#D96C75")
+                card.add(FlexUi.horizontal(List.of(
+                        FlexUi.button("編集", "メモ編集案内 " + (i + 1), "#6CA6E5"),
+                        FlexUi.button(row.favorite() ? "★解除" : "★お気に入り", "メモお気に入り実行 " + (i + 1), "#D7A63E"),
+                        FlexUi.button("削除", "メモ削除確認 " + (i + 1), "#D96C75")
                 )));
-                body.add(vertical("#F7FAFF", card));
+                body.add(FlexUi.card("#F7FAFF", "16px", "md", card));
             }
-            body.add(button("メモをすべて削除", "メモ全削除確認", "#B94A55"));
+            body.add(FlexUi.button("メモをすべて削除", "メモ全削除確認", "#B94A55"));
         }
-        body.add(button("メモを追加", "メモ追加", "#E4A5BF"));
-        body.add(button("← メモ・タスク", "記録メニュー", "#8E9CB3"));
-        body.add(button("🏠 ホーム", "ホーム", "#8E9CB3"));
+        body.add(FlexUi.button("メモを追加", "メモ追加", "#E4A5BF"));
+        body.add(FlexUi.button("← メモ・タスク", "記録メニュー", "#8E9CB3"));
+        body.add(FlexUi.button("🏠 ホーム", "ホーム", "#8E9CB3"));
         return listBubble("メモ一覧", rows.size() + "件を表示中", "#DDF5EE", "#2E9B6B", body);
     }
 
@@ -236,25 +203,25 @@ public class RecordManagementFilter extends OncePerRequestFilter {
         List<TaskRow> rows = taskRows(userId);
         List<Map<String, Object>> body = new ArrayList<>();
         if (rows.isEmpty()) {
-            body.add(text("未完了タスクはゼロ！", "md", "regular", "#526D82"));
+            body.add(FlexUi.text("未完了タスクはゼロ！", "md", "regular", "#526D82"));
         } else {
             for (int i = 0; i < rows.size(); i++) {
                 TaskRow row = rows.get(i);
                 List<Map<String, Object>> card = new ArrayList<>();
-                card.add(text((i + 1) + ". " + priorityLabel(row.priority()) + row.title(), "md", "bold", "#243B53"));
-                card.add(text(dueLabel(row.dueAt()), "sm", "regular", row.overdue() ? "#B94A55" : "#526D82"));
-                card.add(horizontal(List.of(
-                        button("完了", "タスク完了確認 " + (i + 1), "#4AAE9E"),
-                        button("延期", "タスク延期案内 " + (i + 1), "#6CA6E5"),
-                        button("削除", "タスク削除確認 " + (i + 1), "#D96C75")
+                card.add(FlexUi.text((i + 1) + ". " + priorityLabel(row.priority()) + row.title(), "md", "bold", "#243B53"));
+                card.add(FlexUi.text(dueLabel(row.dueAt()), "sm", "regular", row.overdue() ? "#B94A55" : "#526D82"));
+                card.add(FlexUi.horizontal(List.of(
+                        FlexUi.button("完了", "タスク完了確認 " + (i + 1), "#4AAE9E"),
+                        FlexUi.button("延期", "タスク延期案内 " + (i + 1), "#6CA6E5"),
+                        FlexUi.button("削除", "タスク削除確認 " + (i + 1), "#D96C75")
                 )));
-                body.add(vertical("#F7FAFF", card));
+                body.add(FlexUi.card("#F7FAFF", "16px", "md", card));
             }
-            body.add(button("未完了タスクをすべて削除", "タスク全削除確認", "#B94A55"));
+            body.add(FlexUi.button("未完了タスクをすべて削除", "タスク全削除確認", "#B94A55"));
         }
-        body.add(button("タスクを追加", "タスク追加", "#71C9B7"));
-        body.add(button("← メモ・タスク", "記録メニュー", "#8E9CB3"));
-        body.add(button("🏠 ホーム", "ホーム", "#8E9CB3"));
+        body.add(FlexUi.button("タスクを追加", "タスク追加", "#71C9B7"));
+        body.add(FlexUi.button("← メモ・タスク", "記録メニュー", "#8E9CB3"));
+        body.add(FlexUi.button("🏠 ホーム", "ホーム", "#8E9CB3"));
         return listBubble("未完了タスク", rows.size() + "件を表示中", "#DDF5EE", "#2E9B6B", body);
     }
 
@@ -306,27 +273,27 @@ public class RecordManagementFilter extends OncePerRequestFilter {
 
     private Map<String, Object> listBubble(String title, String subtitle, String headerColor,
                                            String accent, List<Map<String, Object>> body) {
-        Map<String, Object> bubble = baseBubble();
-        bubble.put("header", vertical(headerColor, List.of(
-                text(title, "xl", "bold", accent),
-                text(subtitle, "sm", "regular", "#526D82")
-        )));
-        bubble.put("body", vertical("#FAFCFF", body));
-        return bubble;
+        return FlexUi.bubble(
+                FlexUi.vertical(headerColor, "16px", "md", List.of(
+                        FlexUi.text(title, "xl", "bold", accent),
+                        FlexUi.text(subtitle, "sm", "regular", "#526D82")
+                )),
+                FlexUi.vertical("#FAFCFF", "16px", "md", body)
+        );
     }
 
     private Map<String, Object> itemConfirmBubble(String title, String item, String actionLabel,
                                                    String actionMessage, String cancelMessage) {
-        Map<String, Object> bubble = baseBubble();
-        bubble.put("header", vertical("#FFE8EB", List.of(
-                text(title, "xl", "bold", "#A33A45"),
-                text(item, "md", "regular", "#6D3B42")
-        )));
-        bubble.put("body", vertical("#FFF9FA", List.of(
-                button(actionLabel, actionMessage, "#B94A55"),
-                button("やめる", cancelMessage, "#8E9CB3")
-        )));
-        return bubble;
+        return FlexUi.bubble(
+                FlexUi.vertical("#FFE8EB", "16px", "md", List.of(
+                        FlexUi.text(title, "xl", "bold", "#A33A45"),
+                        FlexUi.text(item, "md", "regular", "#6D3B42")
+                )),
+                FlexUi.vertical("#FFF9FA", "16px", "md", List.of(
+                        FlexUi.button(actionLabel, actionMessage, "#B94A55"),
+                        FlexUi.button("やめる", cancelMessage, "#8E9CB3")
+                ))
+        );
     }
 
     private Map<String, Object> clearConfirmBubble(String subject, String execute, String cancel) {
@@ -335,67 +302,17 @@ public class RecordManagementFilter extends OncePerRequestFilter {
     }
 
     private Map<String, Object> editGuideBubble(String title, String item, String example, String back) {
-        Map<String, Object> bubble = baseBubble();
-        bubble.put("header", vertical("#DDEBFF", List.of(
-                text(title, "xl", "bold", "#2E6FC4"),
-                text(item, "md", "regular", "#526D82")
-        )));
-        bubble.put("body", vertical("#FAFCFF", List.of(
-                text("変更内容を送ってね", "md", "bold", "#334E68"),
-                text(example, "sm", "regular", "#526D82"),
-                button("← 一覧へ戻る", back, "#8E9CB3")
-        )));
-        return bubble;
-    }
-
-    private Map<String, Object> baseBubble() {
-        Map<String, Object> bubble = new LinkedHashMap<>();
-        bubble.put("type", "bubble");
-        bubble.put("size", "mega");
-        return bubble;
-    }
-
-    private Map<String, Object> vertical(String background, List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "vertical");
-        box.put("backgroundColor", background);
-        box.put("paddingAll", "16px");
-        box.put("spacing", "md");
-        box.put("contents", contents);
-        return box;
-    }
-
-    private Map<String, Object> horizontal(List<Map<String, Object>> contents) {
-        Map<String, Object> box = new LinkedHashMap<>();
-        box.put("type", "box");
-        box.put("layout", "horizontal");
-        box.put("spacing", "sm");
-        box.put("contents", contents);
-        return box;
-    }
-
-    private Map<String, Object> text(String value, String size, String weight, String color) {
-        Map<String, Object> text = new LinkedHashMap<>();
-        text.put("type", "text");
-        text.put("text", value);
-        text.put("size", size);
-        text.put("weight", weight);
-        text.put("color", color);
-        text.put("wrap", true);
-        return text;
-    }
-
-    private Map<String, Object> button(String label, String message, String color) {
-        Map<String, Object> button = new LinkedHashMap<>();
-        button.put("type", "button");
-        button.put("style", "primary");
-        button.put("height", "sm");
-        button.put("color", color);
-        button.put("flex", 1);
-        button.put("adjustMode", "shrink-to-fit");
-        button.put("action", Map.of("type", "message", "label", label, "text", message));
-        return button;
+        return FlexUi.bubble(
+                FlexUi.vertical("#DDEBFF", "16px", "md", List.of(
+                        FlexUi.text(title, "xl", "bold", "#2E6FC4"),
+                        FlexUi.text(item, "md", "regular", "#526D82")
+                )),
+                FlexUi.vertical("#FAFCFF", "16px", "md", List.of(
+                        FlexUi.text("変更内容を送ってね", "md", "bold", "#334E68"),
+                        FlexUi.text(example, "sm", "regular", "#526D82"),
+                        FlexUi.button("← 一覧へ戻る", back, "#8E9CB3")
+                ))
+        );
     }
 
     private Integer extractNumber(String input) {
@@ -404,63 +321,13 @@ public class RecordManagementFilter extends OncePerRequestFilter {
     }
 
     private void replyFlex(String replyToken, String altText, Map<String, Object> bubble) throws Exception {
-        Map<String, Object> flex = new LinkedHashMap<>();
-        flex.put("type", "flex");
-        flex.put("altText", altText);
-        flex.put("contents", bubble);
-        sendReply(replyToken, List.of(flex));
+        line.reply(replyToken, List.of(FlexUi.flexMessage(altText, bubble)));
     }
 
     private void replyText(String replyToken, String value) throws Exception {
-        sendReply(replyToken, List.of(Map.of("type", "text", "text", value)));
-    }
-
-    private void sendReply(String replyToken, List<Map<String, Object>> messages) throws Exception {
-        String json = mapper.writeValueAsString(Map.of("replyToken", replyToken, "messages", messages));
-        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.line.me/v2/bot/message/reply"))
-                .header("Authorization", "Bearer " + props.channelAccessToken())
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)).build();
-        HttpResponse<Void> result = client.send(request, HttpResponse.BodyHandlers.discarding());
-        if (result.statusCode() / 100 != 2) throw new IllegalStateException("LINE API error: " + result.statusCode());
-    }
-
-    private boolean validSignature(byte[] body, String received) {
-        if (received == null || props.channelSecret() == null || props.channelSecret().isBlank()) return false;
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(props.channelSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String expected = Base64.getEncoder().encodeToString(mac.doFinal(body));
-            return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), received.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean allowed(String userId) {
-        return props.ownerUserId() == null || props.ownerUserId().isBlank() || props.ownerUserId().equals(userId);
+        line.reply(replyToken, List.of(Map.of("type", "text", "text", value)));
     }
 
     private record MemoRow(long id, String content, boolean favorite, String tags) {}
     private record TaskRow(long id, String title, String priority, Timestamp dueAt, boolean overdue) {}
-
-    private static final class CachedRequest extends HttpServletRequestWrapper {
-        private final byte[] body;
-        private CachedRequest(HttpServletRequest request, byte[] body) { super(request); this.body = body; }
-        @Override public int getContentLength() { return body.length; }
-        @Override public long getContentLengthLong() { return body.length; }
-        @Override public ServletInputStream getInputStream() {
-            ByteArrayInputStream input = new ByteArrayInputStream(body);
-            return new ServletInputStream() {
-                @Override public boolean isFinished() { return input.available() == 0; }
-                @Override public boolean isReady() { return true; }
-                @Override public void setReadListener(ReadListener listener) {}
-                @Override public int read() { return input.read(); }
-                @Override public int read(byte[] b, int off, int len) { return input.read(b, off, len); }
-            };
-        }
-        @Override public BufferedReader getReader() {
-            return new BufferedReader(new InputStreamReader(getInputStream(), StandardCharsets.UTF_8));
-        }
-    }
 }
