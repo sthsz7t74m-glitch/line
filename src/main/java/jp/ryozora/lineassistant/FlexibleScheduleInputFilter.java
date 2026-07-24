@@ -23,13 +23,16 @@ public class FlexibleScheduleInputFilter extends OncePerRequestFilter {
     private final LineWebhookSupport webhook;
     private final NaturalLanguageService naturalLanguageService;
     private final AdvancedScheduleService scheduleService;
+    private final PendingScheduleCreation pendingStore;
 
     public FlexibleScheduleInputFilter(LineWebhookSupport webhook,
                                        NaturalLanguageService naturalLanguageService,
-                                       AdvancedScheduleService scheduleService) {
+                                       AdvancedScheduleService scheduleService,
+                                       PendingScheduleCreation pendingStore) {
         this.webhook = webhook;
         this.naturalLanguageService = naturalLanguageService;
         this.scheduleService = scheduleService;
+        this.pendingStore = pendingStore;
     }
 
     @Override
@@ -56,15 +59,22 @@ public class FlexibleScheduleInputFilter extends OncePerRequestFilter {
                 String value = input.substring("予定".length()).strip();
                 NaturalLanguageService.Interpretation interpretation = naturalLanguageService.interpret(value);
                 if (interpretation == null || interpretation.type() != NaturalLanguageService.Type.SCHEDULE) {
-                    webhook.reply(event.replyToken(), List.of(guideMessage()));
+                    if (!value.isBlank()) {
+                        pendingStore.start(event.userId(), value);
+                        webhook.reply(event.replyToken(), List.of(pendingMessage(value)));
+                    } else {
+                        webhook.reply(event.replyToken(), List.of(guideMessage()));
+                    }
                     response.setStatus(HttpServletResponse.SC_OK);
                     return;
                 }
 
                 String result = scheduleService.handle(event.userId(), interpretation.command());
                 if (result == null || result.isBlank()) {
-                    webhook.reply(event.replyToken(), List.of(guideMessage()));
+                    pendingStore.start(event.userId(), value);
+                    webhook.reply(event.replyToken(), List.of(pendingMessage(value)));
                 } else {
+                    pendingStore.clear(event.userId());
                     webhook.reply(event.replyToken(), List.of(successMessage(result)));
                 }
                 response.setStatus(HttpServletResponse.SC_OK);
@@ -115,17 +125,35 @@ public class FlexibleScheduleInputFilter extends OncePerRequestFilter {
         ));
     }
 
+    private Map<String, Object> pendingMessage(String value) {
+        return FlexUi.flexMessage("予定の続きを入力してね", FlexUi.bubble(
+                FlexUi.vertical("#FFF2DE", "14px", "xs", List.of(
+                        FlexUi.text("あと少しで登録できるよ", "xl", "bold", "#C68A2B"),
+                        FlexUi.text("入力待ちは10分間", "xxs", "regular", "#718096")
+                )),
+                FlexUi.vertical("#FCFDFE", "12px", "sm", List.of(
+                        FlexUi.card("#FFF9F0", "10px", "xs", List.of(
+                                FlexUi.text("受け取り済み：" + value, "sm", "bold", "#526D82"),
+                                FlexUi.text("内容が足りない場合：映画", "xs", "regular", "#718096"),
+                                FlexUi.text("日時が足りない場合：明日18:00", "xs", "regular", "#718096"),
+                                FlexUi.text("次の一言と組み合わせて登録するよ", "xxs", "regular", "#8A96A6")
+                        )),
+                        FlexUi.button("キャンセル", "キャンセル", "#8793A5")
+                ))
+        ));
+    }
+
     private Map<String, Object> guideMessage() {
         return FlexUi.flexMessage("予定の入力方法", FlexUi.bubble(
                 FlexUi.vertical("#FFF2DE", "14px", "xs", List.of(
-                        FlexUi.text("予定を読み取れなかったよ", "xl", "bold", "#C68A2B")
+                        FlexUi.text("予定を教えてね", "xl", "bold", "#C68A2B")
                 )),
                 FlexUi.vertical("#FCFDFE", "12px", "sm", List.of(
                         FlexUi.card("#FFF9F0", "10px", "xs", List.of(
                                 FlexUi.text("予定 明日 18:00 映画", "sm", "bold", "#334E68"),
                                 FlexUi.text("予定明日18:00映画", "sm", "bold", "#334E68"),
-                                FlexUi.text("予定 7/30 昼 病院", "sm", "bold", "#334E68"),
-                                FlexUi.text("予定 18:00 買い物", "sm", "bold", "#334E68")
+                                FlexUi.text("予定 明日 → 次に『映画』", "sm", "bold", "#334E68"),
+                                FlexUi.text("予定 映画 → 次に『明日18:00』", "sm", "bold", "#334E68")
                         )),
                         FlexUi.button("🏠 ホーム", "ホーム", "#8793A5")
                 ))
